@@ -24,11 +24,15 @@
 -define(E(__Fmt), ?E(__Fmt,[])).
 
 -define(L(__Fmt,__Args),
-        if Verbose ->
-               io:format("[~p] "++__Fmt++"~n",
-                         [?LINE | __Args]);
-           true -> ok
-        end).
+        (fun() ->
+                 case get(verbose) of
+                     V when V == true; V == undefined ->
+                         io:format("[~p] "++__Fmt++"~n", [?LINE | __Args]),
+                         if V == undefined -> put(verbose, true);
+                            true -> ok end;
+                     false -> ok
+                 end
+         end)()).
 -define(L(__Fmt), ?L(__Fmt,[])).
 
 -define(OSCMD(__Cmd),
@@ -40,28 +44,112 @@
     end)()
 ).
 
-main([Proj, ProjDir, ReleaseDir, "-v"]) ->
-    build_msi(true, Proj, ProjDir, ReleaseDir);
-main([Proj, ProjDir, ReleaseDir]) ->
-    ?E("no verbose"),
-    build_msi(false, Proj, ProjDir, ReleaseDir);
-main(Opts) ->
-    ?E("Invalid Opts ~p", [Opts]).
+-define(FNJ(__Parts), filename:join(__Parts)).
 
-build_msi(Verbose, Proj, ProjDir, ReleaseDir) ->
-    {ok, [{application,_,AppProps}]} =
-        file:consult(filename:join([ProjDir,"src",Proj++".app.src"])),
-    Version = proplists:get_value(vsn, AppProps, ""),
-    ?L("Building ~s-~s MSI", [Proj, Version]),
-    BuildSourceDir = filename:join(ReleaseDir, Proj++"-"++Version),
-    build_sources(Verbose, Proj, ProjDir, BuildSourceDir),
-    rebar_generate(Verbose, Proj, BuildSourceDir),
-    {ok, _} = dets:open_file(Proj++"ids", [{ram_file, true},
-                                           {file, Proj++"ids.dets"},
+get_app_src(SDir) ->
+    case filelib:wildcard("*.app.src", SDir) of
+        [AppSrcFile] ->
+            case catch file:consult(?FNJ([SDir, AppSrcFile])) of
+                {'EXIT', Error} -> exit({"bad file", AppSrcFile, Error});
+                {ok, AppSrcFileData} -> AppSrcFileData
+            end;
+        Else -> exit({"unable to proceed with following app.src info", Else})
+    end.
+
+get_app_src_from_rebar_conf(RootPath) ->
+    case catch file:consult(?FNJ([RootPath, "rebar.config"])) of
+        {'EXIT', Error} ->
+            exit({"rebar.config not found", Error});
+        {ok, RebarConf} ->
+            case proplists:get_value(sub_dirs, RebarConf) of
+                undefined ->
+                    exit("sub_dirs not defined in rebar.config");
+                SubDirs ->
+                    case lists:foldl(
+                           fun(Dir, undefined) ->
+                                   case catch get_app_src(
+                                                ?FNJ([RootPath,Dir,"src"])) of
+                                       {'EXIT', _} -> undefined;
+                                       AppSrc -> AppSrc
+                                   end;
+                              (_Dir, AppSrc) -> AppSrc
+                           end, undefined, SubDirs) of
+                        undefined ->
+                            exit({"src dir not found", SubDirs});
+                        AppSrcFileData -> AppSrcFileData
+                    end
+            end
+    end.
+
+app_info_from_app_src(AppSrcData) ->
+    case lists:keyfind(application, 1, AppSrcData) of
+        false -> exit({"malformed", AppSrcData});
+        {application, AppName, AppConfig} ->
+            Desc = case proplists:get_value(description, AppConfig) of
+                       undefined -> "";
+                       D -> D
+                   end,
+            Version = case proplists:get_value(vsn, AppConfig) of
+                       undefined -> exit("version not defined");
+                       V -> V
+                   end,
+            {AppName, Desc, Version}
+    end.
+
+-record(config, {app, desc, version, tmpSrcDir, topDir}).
+
+main([]) -> main(false);
+main(["-v"]) -> main(true);
+main(V) when is_atom(V) ->
+    put(verbose, V),
+    io:format(user, "[~p] build_msi progress verbose ~p~n", [?LINE, V]),
+    ScriptPath = filename:absname(escript:script_name()),
+    RootPath = case lists:reverse(filename:split(ScriptPath)) of
+                   ["build_msi.escript", "windows", "erlpkg", "deps"
+                    | RootPathPartsRev] ->
+                       filename:join(lists:reverse(RootPathPartsRev));
+                   _ ->
+                       exit({"owner project path not found",
+                              ScriptPath})
+               end,
+    SDir = ?FNJ([RootPath, "src"]),
+    AppSrcData = case filelib:is_dir(SDir) of
+                 false -> get_app_src_from_rebar_conf(RootPath);
+                 true -> get_app_src(SDir)
+             end,
+    {App, Desc, Version} = app_info_from_app_src(AppSrcData),
+    ReleaseTopDir = ?FNJ([RootPath, "rel", "erlpkg_release"]),
+    case filelib:is_dir(ReleaseTopDir) of
+        false -> ok = file:make_dir(ReleaseTopDir);
+        _ -> ok
+    end,
+    AppStr = atom_to_list(App),
+    Conf = #config{app = AppStr, desc = Desc, version = Version, topDir = RootPath,
+                   tmpSrcDir = ?FNJ([ReleaseTopDir, AppStr++"-"++Version])},
+    ?OSCMD("rm -rf "++Conf#config.tmpSrcDir),
+    put(config, Conf),
+    C = get(config),
+    ?L("packaging ~p (~s) of version ~s", [C#config.app, C#config.desc, C#config.version]),
+    build_msi().
+
+%main([Proj, ProjDir, ReleaseDir, "-v"]) ->
+%    build_msi(true, Proj, ProjDir, ReleaseDir);
+%main([Proj, ProjDir, ReleaseDir]) ->
+%    ?E("no verbose"),
+%    build_msi(false, Proj, ProjDir, ReleaseDir);
+%main(Opts) ->
+%    ?E("Invalid Opts ~p", [Opts]).
+
+build_msi() ->
+    C = get(config),
+    build_sources(),
+    rebar_generate(C#config.app, C#config.tmpSrcDir),
+    {ok, _} = dets:open_file(C#config.app++"ids", [{ram_file, true},
+                                           {file, C#config.app++"ids.dets"},
                                            {keypos, 2}]),
-    create_wxs(Verbose, Proj, Version, BuildSourceDir),
-    candle_light(Verbose, Proj, Version, BuildSourceDir),
-    ok = dets:close(Proj++"ids").
+    create_wxs(C#config.app, C#config.version, C#config.tmpSrcDir),
+    candle_light(C#config.app, C#config.version, C#config.tmpSrcDir),
+    ok = dets:close(C#config.app++"ids").
     
 uuid() ->
     string:to_upper(re:replace(os:cmd("uuidgen.exe"), "\r\n", "",
@@ -96,35 +184,35 @@ log_cmd(Cmd, Port) when is_port(Port) ->
             log_cmd(Cmd, Port)
     end.
 
-build_sources(Verbose, Proj, ProjDir, RootDir) ->
-    ?L("Source ~s", [ProjDir]),
-    ?L("Build Source in ~s", [RootDir]),
-    ?OSCMD("rm -rf "++RootDir),
-    ok = file:make_dir(RootDir),
+build_sources() ->
+    C = get(config),
+    ?L("Source ~s", [C#config.topDir]),
+    ?L("Build Source in ~s", [C#config.tmpSrcDir]),
+    ?OSCMD("rm -rf "++C#config.tmpSrcDir),
+    ok = file:make_dir(C#config.tmpSrcDir),
     [begin
-        {ok, _} = file:copy(filename:join(ProjDir,F),
-                        filename:join(RootDir,F))
+        {ok, _} = file:copy(filename:join(C#config.topDir,F),
+                        filename:join(C#config.tmpSrcDir,F))
     end || F <- ["rebar.config", "LICENSE", "README.md",
-                 "RELEASE-"++string:to_upper(Proj)++".md"]],
+                 "RELEASE-"++string:to_upper(C#config.app)++".md"]],
     RebarCmd = os:find_executable("rebar"),
-    ?OSCMD("cp -L \""++RebarCmd++"\" \""++RootDir++"\""),
-    ?OSCMD("cp -L \""++filename:rootname(RebarCmd)++"\" \""++RootDir++"\""),
-    ok = file:write_file(filename:join(RootDir,"rebar.bat"),
+    ?OSCMD("cp -L \""++RebarCmd++"\" \""++C#config.tmpSrcDir++"\""),
+    ?OSCMD("cp -L \""++filename:rootname(RebarCmd)++"\" \""++C#config.tmpSrcDir++"\""),
+    ok = file:write_file(filename:join(C#config.tmpSrcDir,"rebar.bat"),
                          <<"rebar.cmd %*\n">>),
-    copy_folder(ProjDir, RootDir, ["include"], "*.*"),
-    copy_folder(ProjDir, RootDir, ["src"], "*.*"),
-    copy_folder(ProjDir, RootDir, ["docs"], "*.*"),
-    copy_folder(ProjDir, RootDir, ["rel"], "*.*"),
-    copy_folder(ProjDir, RootDir, ["rel", "files"], "*"),
-    copy_folder(ProjDir, RootDir, ["rel", "wixsetup"], "*.*"),
+    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["include"], "*.*"),
+    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["src"], "*.*"),
+    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["docs"], "*.*"),
+    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["rel"], "*.*"),
+    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["rel", "files"], "*"),
 
-    Priv = filename:join(RootDir, "priv"),
+    Priv = filename:join(C#config.tmpSrcDir, "priv"),
     ok = file:make_dir(Priv),
-    copy_deep(filename:join([ProjDir, "priv"]), Priv),
+    copy_deep(filename:join([C#config.topDir, "priv"]), Priv),
     
-    Deps = filename:join(RootDir, "deps"),
+    Deps = filename:join(C#config.tmpSrcDir, "deps"),
     ok = file:make_dir(Deps),
-    copy_deep(filename:join([ProjDir, "deps"]), Deps).
+    copy_deep(filename:join([C#config.topDir, "deps"]), Deps).
 
 copy_folder(Src, Target, Folders, Match) ->
     ok = file:make_dir(filename:join([Target|Folders])),
@@ -161,25 +249,20 @@ copy_deep(ProjDep, TargetDep) ->
      end
      || D <- filelib:wildcard("*", ProjDep)].
 
-rebar_generate(Verbose, Proj, Root) ->
+rebar_generate(Proj, Root) ->
     file:delete(Proj++"ids.dets"),
     {ok, CurDir} = file:get_cwd(),
-    if Verbose ->
-           ?L("Entering ~s from ~s", [Root, CurDir]);
-       true -> ok
-    end,
+    ?L("Entering ~s from ~s", [Root, CurDir]),
     ok = file:set_cwd(Root),
     ?L("Clean Compile and generate..."),
     run_port("rebar.bat", ["clean"], Root),
     run_port("rebar.bat", ["compile"], Root),
     run_port("rebar.bat", ["generate", "skip_deps=true"], Root),
-    if Verbose ->
-           ?L("Leaving ~s to ~s", [Root, CurDir]);
-       true -> ok
-    end,
+    ?L("Leaving ~s to ~s", [Root, CurDir]),
     ok = file:set_cwd(CurDir).
 
-create_wxs(Verbose, Proj, Version, Root) ->
+create_wxs(Proj, Version, Root) ->
+    Verbose = get(verbose), 
     Tab = Proj++"ids",
     Product = Proj++"_"++Version,
     {ok, FileH} = file:open(
@@ -504,7 +587,8 @@ create_wxs(Verbose, Proj, Version, Root) ->
 
     ok = file:close(FileH).
 
-candle_light(Verbose, Proj, Version, Root) ->
+candle_light(Proj, Version, Root) ->
+    Verbose = get(verbose),
     {ok, CurDir} = file:get_cwd(),
     ok = file:set_cwd(filename:join([Root,"rel","wixsetup"])),
     Wxses = filelib:wildcard("*.wxs"),
