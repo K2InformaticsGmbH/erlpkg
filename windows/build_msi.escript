@@ -46,6 +46,103 @@
 
 -define(FNJ(__Parts), filename:join(__Parts)).
 
+-record(config, {app, desc, version, tmpSrcDir, topDir, rebar, candle, light, msiPath}).
+
+main([]) -> main(false);
+main(["-v"]) -> main(true);
+main(V) when is_atom(V) ->
+    put(verbose, V),
+    io:format(user, "[~p] build_msi with verbose ~p~n", [?LINE, V]),
+    ScriptPath = filename:absname(escript:script_name()),
+    RootPath = case lists:reverse(filename:split(ScriptPath)) of
+                   ["build_msi.escript", "windows", "erlpkg", "deps"
+                    | RootPathPartsRev] ->
+                       filename:join(lists:reverse(RootPathPartsRev));
+                   _ ->
+                       exit({"owner project path not found",
+                              ScriptPath})
+               end,
+    Rebar = case os:find_executable("rebar") of
+        false ->
+            case os:find_executable("rebar", RootPath) of
+                false -> exit("rebar not found");
+                R-> R
+            end;
+        R -> R
+    end,
+    Candle = case os:find_executable("candle.exe") of
+                 false -> exit("candle.exe not found, wix not installed?");
+                 Cndl -> Cndl
+             end,
+    Light = case os:find_executable("light.exe") of
+                 false -> exit("light.exe not found, wix not installed?");
+                 L -> L
+             end,
+    SDir = ?FNJ([RootPath, "src"]),
+    AppSrcData = case filelib:is_dir(SDir) of
+                 false -> get_app_src_from_rebar_conf(RootPath);
+                 true -> get_app_src(SDir)
+             end,
+    {App, Desc, Version} = app_info_from_app_src(AppSrcData),
+    ReleaseTopDir = ?FNJ([RootPath, "rel", "erlpkg_release"]),
+    case filelib:is_dir(ReleaseTopDir) of
+        false -> ok = file:make_dir(ReleaseTopDir);
+        _ -> ok
+    end,
+    MsiPath = ?FNJ([ReleaseTopDir,"msi"]),
+    case filelib:is_dir(MsiPath) of
+        false -> ok = file:make_dir(MsiPath);
+        _ -> ok
+    end,
+    % TODO
+    % Copying host specific files
+    % TO be optionally overridden by host application
+    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","ServiceSetupDlg.wxs"]),
+                   ?FNJ([MsiPath,"ServiceSetupDlg.wxs"])) of
+        {error, Error} ->
+            exit({"failed to copy ServiceSetupDlg.wxs", Error});
+        _ -> ok
+    end,
+    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","banner493x58.jpg"]),
+                   ?FNJ([MsiPath,"banner493x58.jpg"])) of
+        {error, Error1} ->
+            exit({"failed to copy banner493x58.jpg", Error1});
+        _ -> ok
+    end,
+    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","dialog493x312.jpg"]),
+                   ?FNJ([MsiPath,"dialog493x312.jpg"])) of
+        {error, Error2} ->
+            exit({"failed to copy dialog493x312.jpg", Error2});
+        _ -> ok
+    end,
+    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","dderl.ico"]),
+                   ?FNJ([MsiPath,"dderl.ico"])) of
+        {error, Error3} ->
+            exit({"failed to copy dderl.ico", Error3});
+        _ -> ok
+    end,
+    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","License.rtf"]),
+                   ?FNJ([MsiPath,"License.rtf"])) of
+        {error, Error4} ->
+            exit({"failed to copy License.rtf", Error4});
+        _ -> ok
+    end,
+    AppStr = atom_to_list(App),
+    Conf = #config{app = AppStr, desc = Desc, rebar = Rebar, light = Light,
+                   topDir = RootPath, version = Version, candle = Candle,
+                   tmpSrcDir = ?FNJ([ReleaseTopDir, AppStr++"-"++Version]),
+                   msiPath = MsiPath},
+    put(config, Conf),
+    C = get(config),
+    ?L("packaging ~p (~s) of version ~s", [C#config.app, C#config.desc, C#config.version]),
+    ?L("app root: ~s", [C#config.topDir]),
+    ?L("tmp src: ~s", [C#config.tmpSrcDir]),
+    ?L("MSI path: ~s", [C#config.msiPath]),
+    ?L("rebar: ~s", [C#config.rebar]),
+    ?L("candle.exe: ~s", [C#config.candle]),
+    ?L("light.exe: ~s", [C#config.light]),
+    build_msi().
+
 get_app_src(SDir) ->
     case filelib:wildcard("*.app.src", SDir) of
         [AppSrcFile] ->
@@ -96,59 +193,16 @@ app_info_from_app_src(AppSrcData) ->
             {AppName, Desc, Version}
     end.
 
--record(config, {app, desc, version, tmpSrcDir, topDir}).
-
-main([]) -> main(false);
-main(["-v"]) -> main(true);
-main(V) when is_atom(V) ->
-    put(verbose, V),
-    io:format(user, "[~p] build_msi progress verbose ~p~n", [?LINE, V]),
-    ScriptPath = filename:absname(escript:script_name()),
-    RootPath = case lists:reverse(filename:split(ScriptPath)) of
-                   ["build_msi.escript", "windows", "erlpkg", "deps"
-                    | RootPathPartsRev] ->
-                       filename:join(lists:reverse(RootPathPartsRev));
-                   _ ->
-                       exit({"owner project path not found",
-                              ScriptPath})
-               end,
-    SDir = ?FNJ([RootPath, "src"]),
-    AppSrcData = case filelib:is_dir(SDir) of
-                 false -> get_app_src_from_rebar_conf(RootPath);
-                 true -> get_app_src(SDir)
-             end,
-    {App, Desc, Version} = app_info_from_app_src(AppSrcData),
-    ReleaseTopDir = ?FNJ([RootPath, "rel", "erlpkg_release"]),
-    case filelib:is_dir(ReleaseTopDir) of
-        false -> ok = file:make_dir(ReleaseTopDir);
-        _ -> ok
-    end,
-    AppStr = atom_to_list(App),
-    Conf = #config{app = AppStr, desc = Desc, version = Version, topDir = RootPath,
-                   tmpSrcDir = ?FNJ([ReleaseTopDir, AppStr++"-"++Version])},
-    ?OSCMD("rm -rf "++Conf#config.tmpSrcDir),
-    put(config, Conf),
-    C = get(config),
-    ?L("packaging ~p (~s) of version ~s", [C#config.app, C#config.desc, C#config.version]),
-    build_msi().
-
-%main([Proj, ProjDir, ReleaseDir, "-v"]) ->
-%    build_msi(true, Proj, ProjDir, ReleaseDir);
-%main([Proj, ProjDir, ReleaseDir]) ->
-%    ?E("no verbose"),
-%    build_msi(false, Proj, ProjDir, ReleaseDir);
-%main(Opts) ->
-%    ?E("Invalid Opts ~p", [Opts]).
-
 build_msi() ->
     C = get(config),
-    build_sources(),
-    rebar_generate(C#config.app, C#config.tmpSrcDir),
-    {ok, _} = dets:open_file(C#config.app++"ids", [{ram_file, true},
-                                           {file, C#config.app++"ids.dets"},
-                                           {keypos, 2}]),
-    create_wxs(C#config.app, C#config.version, C#config.tmpSrcDir),
-    candle_light(C#config.app, C#config.version, C#config.tmpSrcDir),
+    %build_sources(),
+    %rebar_generate(),
+    ?L("OTP release prepared"),
+    {ok, _} = dets:open_file(C#config.app++"ids",
+                             [{ram_file, true},
+                              {file, C#config.app++"ids.dets"}, {keypos, 2}]),
+    create_wxs(),
+    candle_light(),
     ok = dets:close(C#config.app++"ids").
     
 uuid() ->
@@ -195,9 +249,9 @@ build_sources() ->
                         filename:join(C#config.tmpSrcDir,F))
     end || F <- ["rebar.config", "LICENSE", "README.md",
                  "RELEASE-"++string:to_upper(C#config.app)++".md"]],
-    RebarCmd = os:find_executable("rebar"),
-    ?OSCMD("cp -L \""++RebarCmd++"\" \""++C#config.tmpSrcDir++"\""),
-    ?OSCMD("cp -L \""++filename:rootname(RebarCmd)++"\" \""++C#config.tmpSrcDir++"\""),
+    ?OSCMD("cp -L \""++C#config.rebar++"\" \""++C#config.tmpSrcDir++"\""),
+    ?OSCMD("cp -L \""++filename:rootname(C#config.rebar)++"\" \""
+           ++C#config.tmpSrcDir++"\""),
     ok = file:write_file(filename:join(C#config.tmpSrcDir,"rebar.bat"),
                          <<"rebar.cmd %*\n">>),
     copy_folder(C#config.topDir, C#config.tmpSrcDir, ["include"], "*.*"),
@@ -217,6 +271,7 @@ build_sources() ->
 copy_folder(Src, Target, Folders, Match) ->
     ok = file:make_dir(filename:join([Target|Folders])),
     SrcFolder = filename:join([Src|Folders]),
+    ?L("cp ~s", [SrcFolder]),
     [begin
          Source = filename:join(SrcFolder,F),
          IsFile = (filelib:is_dir(Source) == false andalso
@@ -234,39 +289,44 @@ copy_deep(ProjDep, TargetDep) ->
         "ebin" -> skip;
         ".gitignore" -> skip;       
         D ->
-            case filelib:is_dir(filename:join(ProjDep, D)) of
-                true ->
-                    ok = file:make_dir(filename:join(TargetDep, D)),
-                    copy_deep(filename:join(ProjDep, D)
-                            , filename:join(TargetDep, D));
-                false ->
-                    SrcFile = filename:join(ProjDep, D),
-                    DstFile = filename:join(TargetDep, D),
-                    {ok, #file_info{mode = Mode}} = file:read_file_info(SrcFile),
-                    {ok, _} = file:copy(SrcFile, DstFile),
-                    ok = file:change_mode(DstFile, Mode)
-            end
+             Src = filename:join(ProjDep, D),
+             Dst = filename:join(TargetDep, D),
+             case filelib:is_dir(Src) of
+                 true ->
+                     ?L("cp ~s", [Src]),
+                     ok = file:make_dir(Dst),
+                     copy_deep(Src, Dst);
+                 false ->
+                     {ok, #file_info{mode = Mode}} = file:read_file_info(Src),
+                     {ok, _} = file:copy(Src, Dst),
+                     ok = file:change_mode(Dst, Mode)
+             end
      end
      || D <- filelib:wildcard("*", ProjDep)].
 
-rebar_generate(Proj, Root) ->
-    file:delete(Proj++"ids.dets"),
+rebar_generate() ->
+    C = get(config),
+    file:delete(C#config.app++"ids.dets"),
     {ok, CurDir} = file:get_cwd(),
-    ?L("Entering ~s from ~s", [Root, CurDir]),
-    ok = file:set_cwd(Root),
+    ?L("Entering ~s from ~s", [C#config.tmpSrcDir, CurDir]),
+    ok = file:set_cwd(C#config.tmpSrcDir),
     ?L("Clean Compile and generate..."),
-    run_port("rebar.bat", ["clean"], Root),
-    run_port("rebar.bat", ["compile"], Root),
-    run_port("rebar.bat", ["generate", "skip_deps=true"], Root),
-    ?L("Leaving ~s to ~s", [Root, CurDir]),
+    run_port("rebar.bat", ["clean"], C#config.tmpSrcDir),
+    run_port("rebar.bat", ["compile"], C#config.tmpSrcDir),
+    run_port("rebar.bat", ["generate", "skip_deps=true"], C#config.tmpSrcDir),
+    ?L("Leaving ~s to ~s", [C#config.tmpSrcDir, CurDir]),
     ok = file:set_cwd(CurDir).
 
-create_wxs(Proj, Version, Root) ->
+create_wxs() ->
+    C = get(config),
+    Proj = C#config.app,
+    Version = C#config.version,
+    Root = C#config.tmpSrcDir,
     Verbose = get(verbose), 
     Tab = Proj++"ids",
     Product = Proj++"_"++Version,
     {ok, FileH} = file:open(
-                    filename:join([Root, "rel", "wixsetup",
+                    filename:join([C#config.msiPath,
                                    lists:flatten([Proj,"-",Version,".wxs"])]),
                     [write, raw]),
     {ok, PRODUCT_GUID} = get_id(Verbose, Tab, undefined, 'PRODUCT_GUID', undefined),
@@ -297,6 +357,8 @@ create_wxs(Proj, Version, Root) ->
         "          DiskPrompt='CD-ROM #1'/>\n"
         "   <Property Id='DiskPrompt'\n"
         "             Value=\""?COMPANY" "++Product++" Installation [1]\"/>\n\n"),
+
+    ?L("wxs header sections created"),
 
     ok = file:write(FileH,
         "   <Directory Id='TARGETDIR' Name='SourceDir'>\n"),
@@ -329,11 +391,15 @@ create_wxs(Proj, Version, Root) ->
         "         <Directory Id='INSTALLDIR' Name='"++Product++"'>\n"),
 
     walk_release(Verbose, Proj, Tab, FileH, Root),
+    ?L("finished walking OTP release"),
     
     ok = file:write(FileH,
         "         </Directory> <!-- PRODUCT -->\n"
         "       </Directory> <!-- COMPANY -->\n"
         "     </Directory> <!-- ProgramFilesFolder -->\n"),
+
+    ?L("finished ProgramFilesFolder section"),
+
     % Property references
     [BootDir] = dets:select(Tab, [{#item{type=dir, name=Version, _='_'}, [],
                                    ['$_']}]),
@@ -356,21 +422,31 @@ create_wxs(Proj, Version, Root) ->
         "                   Name='"++Product++"' />\n"
         "     </Directory> <!-- ProgramMenuFolder -->\n\n"),
 
+    ?L("finished ProgramMenuFolder section"),
+
     ok = file:write(FileH,
         "     <Directory Id='DesktopFolder' Name='Desktop'>\n"
         "       <Directory Id='ApplicationDesktopFolder' Name='"++Product++"'/>\n"
         "     </Directory> <!-- DesktopFolder -->\n\n"),
 
+    ?L("finished DesktopFolder section"),
+
     ok = file:write(FileH,
         "   </Directory> <!-- TARGETDIR -->\n\n"),
 
+    ?L("finished TARGETDIR section"),
+
     build_features(Verbose, Proj, Version, FileH),
+
+    ?L("feature sections created"),
 
     ok = file:write(FileH,
         "   <WixVariable Id='WixUILicenseRtf' Value='License.rtf' />\n"
         "   <WixVariable Id='WixUIBannerBmp' Value='banner493x58.jpg' />\n"
         "   <WixVariable Id='WixUIDialogBmp'"
                        " Value='dialog493x312.jpg' />\n\n"),
+
+    ?L("added banner and dialog images and license"),
 
     ok = file:write(FileH,
         "   <UIRef Id='WixUI_Mondo' />\n"
@@ -391,6 +467,8 @@ create_wxs(Proj, Version, Root) ->
         "                Event='NewDialog' Value='ServiceSetupDlg'>\n"
         "           1</Publish>\n"
         "   </UI>\n\n"),
+
+    ?L("added custom setup dialog"),
 
     [VmArgsFile] = dets:select(Tab, [{#item{type=file
                                              , name="vm.args", _='_'}
@@ -438,6 +516,8 @@ create_wxs(Proj, Version, Root) ->
         "   <Property Id='DBNODESCHEMANAME'>"++ImemSchemaName++"</Property>\n"
         "   <Property Id='DBCLUSTERMGRS'><![CDATA["++ImemClustMgrs++"]]></Property>\n"
         "   <Property Id='DBINTF'>"++ImemIntf++":"++ImemPort++"</Property>\n\n"),
+
+    ?L("added properties connecting to custom setup dialog"),
 
     %% Service customization
     EscriptExePath = filename:split(EscriptExe#item.path),
@@ -487,6 +567,8 @@ create_wxs(Proj, Version, Root) ->
                                       "\"[PRODUCTDAT]\\\"'\n"
         "                 Execute='commit' Impersonate='no' />\n\n"),
 
+    ?L("added service configuration custom action"),
+
     % Custom actions service install and start
     %  must run after InstallFiles step is 'comitted'
     % Custom actions service stop and uninstall
@@ -505,6 +587,8 @@ create_wxs(Proj, Version, Root) ->
         "                 ExeCommand='uninstall' Execute='deferred' Impersonate='no' />\n"
         "   <CustomAction Id='StopService' FileKey='"++CItm#item.id++"'\n"
         "                 ExeCommand='stop' Execute='deferred' Impersonate='no' />\n\n"),
+
+    ?L("added service control custom actions"),
 
     % Sequence of custom action is important to ensure
     %  service is installed before started and stopped
@@ -529,6 +613,8 @@ create_wxs(Proj, Version, Root) ->
                 "$"++Comp#item.id++"=3</Custom>\n"
         "   </InstallExecuteSequence>\n\n"),
 
+    ?L("added service start/stop sequence for install/uninstall"),
+
     ok = file:write(FileH,
         "   <DirectoryRef Id='ApplicationProgramMenuFolder'>\n"
         "       <Component Id='"++ProgFolderId++"' Guid='"++ProgFolderGuId++"'>\n"
@@ -551,6 +637,8 @@ create_wxs(Proj, Version, Root) ->
         "                          Value='"++PRODUCT_GUID++"' KeyPath='yes'/>\n"
         "       </Component>\n"
         "   </DirectoryRef>\n"),
+
+    ?L("added short cuts to ApplicationProgramMenuFolder"),
 
     ok = file:write(FileH,
         "   <DirectoryRef Id='ApplicationDesktopFolder'>\n"
@@ -575,6 +663,8 @@ create_wxs(Proj, Version, Root) ->
         "       </Component>\n"
         "   </DirectoryRef>\n"),
 
+    ?L("added short cuts to ApplicationDesktopFolder"),
+
     ok = file:write(FileH,
         "   <Icon Id='"++Proj++".ico' SourceFile='"++Proj++".ico' />\n"),
 
@@ -585,19 +675,22 @@ create_wxs(Proj, Version, Root) ->
         "</Product>\n"
         "</Wix>"),
 
+    ?L("finised building wxs"),
+
     ok = file:close(FileH).
 
-candle_light(Proj, Version, Root) ->
+candle_light() ->
     Verbose = get(verbose),
+    C = get(config),
     {ok, CurDir} = file:get_cwd(),
-    ok = file:set_cwd(filename:join([Root,"rel","wixsetup"])),
+    ok = file:set_cwd(C#config.msiPath),
     Wxses = filelib:wildcard("*.wxs"),
-    run_port(os:find_executable("candle.exe"),
-             if Verbose -> ["-v"]; true -> [] end ++ Wxses),
+    ?L("candle with ~p", [Wxses]),
+    run_port(C#config.candle, if Verbose -> ["-v"]; true -> [] end ++ Wxses),
     WixObjs = filelib:wildcard("*.wixobj"),
-    MsiFile = generate_msi_name(Proj,Version),
-    run_port(os:find_executable("light.exe"),
-             if Verbose -> ["-v"]; true -> [] end
+    MsiFile = generate_msi_name(),
+    ?L("light ~s with ~p", [MsiFile, WixObjs]),
+    run_port(C#config.light, if Verbose -> ["-v"]; true -> [] end
              ++ ["-ext","WixUIExtension","-out",MsiFile | WixObjs]),
     ok = file:set_cwd(CurDir).
 
@@ -611,11 +704,12 @@ get_filepath(Dir, F) ->
           [], filename:split(Dir)),
     filename:join([".." | FilePathNoRel]++[F]).
 
-generate_msi_name(Proj,Version) ->
+generate_msi_name() ->
+    C = get(config),
     {{Y,M,D},{H,Mn,S}} = calendar:local_time(),
     MsiDate = io_lib:format("~4..0B~2..0B~2..0B_~2..0B~2..0B~2..0B",
                             [Y,M,D,H,Mn,S]),
-    lists:flatten([Proj,"-",Version,"_",MsiDate,".msi"]).
+    lists:flatten([C#config.app,"-",C#config.version,"_",MsiDate,".msi"]).
 
 walk_release(Verbose, Proj, Tab, FileH, Root) ->
     ReleaseRoot = filename:join([Root,"rel",Proj]),
