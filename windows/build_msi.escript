@@ -195,8 +195,8 @@ app_info_from_app_src(AppSrcData) ->
 
 build_msi() ->
     C = get(config),
-    %build_sources(),
-    %rebar_generate(),
+    build_sources(),
+    rebar_generate(),
     ?L("OTP release prepared"),
     {ok, _} = dets:open_file(C#config.app++"ids",
                              [{ram_file, true},
@@ -324,7 +324,6 @@ create_wxs() ->
     Root = C#config.tmpSrcDir,
     Verbose = get(verbose), 
     Tab = Proj++"ids",
-    Product = Proj++"_"++Version,
     {ok, FileH} = file:open(
                     filename:join([C#config.msiPath,
                                    lists:flatten([Proj,"-",Version,".wxs"])]),
@@ -336,10 +335,10 @@ create_wxs() ->
         "<?xml version='1.0' encoding='windows-1252'?>\n"
         "<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>\n\n"
 
-        "<Product Name='"++Product++"'\n"
+        "<Product Name='"++Proj++" "++Version++"'\n"
         "         Id='"++PRODUCT_GUID++"'\n"
         "         UpgradeCode='"++UPGRADE_GUID++"'\n"
-        "         Language='1033' Codepage='1252' Version='1.0.7'\n"
+        "         Language='1033' Codepage='1252' Version='"++Version++"'\n"
         "         Manufacturer='"?COMPANY"'>\n\n"
 
         "   <Package Id='*'\n"
@@ -353,10 +352,10 @@ create_wxs() ->
         "            InstallPrivileges='elevated'\n"
         "            SummaryCodepage='1252' />\n\n"
 
-        "   <Media Id='1' Cabinet='"++Product++".cab' EmbedCab='yes'\n"
+        "   <Media Id='1' Cabinet='"++Proj++".cab' EmbedCab='yes'\n"
         "          DiskPrompt='CD-ROM #1'/>\n"
         "   <Property Id='DiskPrompt'\n"
-        "             Value=\""?COMPANY" "++Product++" Installation [1]\"/>\n\n"),
+        "             Value=\""?COMPANY" "++Proj++" Installation [1]\"/>\n\n"),
 
     ?L("wxs header sections created"),
 
@@ -374,7 +373,7 @@ create_wxs() ->
         "             <Permission User='Everyone' GenericAll='yes' />\n"
         "           </CreateFolder>\n"
         "         </Component>\n"
-        "         <Directory Id='PRODUCTDAT' Name='"++Product++"'>\n"
+        "         <Directory Id='PRODUCTDAT' Name='"++Proj++"'>\n"
         "           <Component Id='"++AppDatId++"' Guid='"++AppDatGuId++"'>\n"
         "             <CreateFolder Directory='PRODUCTDAT'>\n"
         "               <Permission User='Everyone' GenericAll='yes' />\n"
@@ -388,7 +387,7 @@ create_wxs() ->
     ok = file:write(FileH,
         "     <Directory Id='ProgramFilesFolder' Name='PFiles'>\n"
         "       <Directory Id='"++ID++"' Name='"?COMPANY"'>\n"
-        "         <Directory Id='INSTALLDIR' Name='"++Product++"'>\n"),
+        "         <Directory Id='INSTALLDIR' Name='"++Proj++"'>\n"),
 
     walk_release(Verbose, Proj, Tab, FileH, Root),
     ?L("finished walking OTP release"),
@@ -419,14 +418,14 @@ create_wxs() ->
     ok = file:write(FileH,
         "     <Directory Id='ProgramMenuFolder' Name='Programs'>\n"
         "        <Directory Id='ApplicationProgramMenuFolder'\n"
-        "                   Name='"++Product++"' />\n"
+        "                   Name='"++Proj++"' />\n"
         "     </Directory> <!-- ProgramMenuFolder -->\n\n"),
 
     ?L("finished ProgramMenuFolder section"),
 
     ok = file:write(FileH,
         "     <Directory Id='DesktopFolder' Name='Desktop'>\n"
-        "       <Directory Id='ApplicationDesktopFolder' Name='"++Product++"'/>\n"
+        "       <Directory Id='ApplicationDesktopFolder' Name='"++Proj++"'/>\n"
         "     </Directory> <!-- DesktopFolder -->\n\n"),
 
     ?L("finished DesktopFolder section"),
@@ -571,17 +570,16 @@ create_wxs() ->
 
     % Custom actions service install and start
     %  must run after InstallFiles step is 'comitted'
-    % Custom actions service stop and uninstall
-    %  must run immediately and before InstallValidate
-    %  step to ensure that installed files are not
-    %  removed and DDErl service is stopped before
-    %  uninstalling process detecets and warns
     ok = file:write(FileH,
         "   <CustomAction Id='InstallService'\n"
         "                 FileKey='"++CItm#item.id++"'\n"
         "                 ExeCommand='install' Execute='commit' Impersonate='no' />\n"
         "   <CustomAction Id='StartService' FileKey='"++CItm#item.id++"'\n"
         "                 ExeCommand='start' Execute='commit' Impersonate='no' />\n"
+    % Custom actions service stop and uninstall
+    %  must run immediately and before InstallValidate step to ensure that
+    %  installed files are not removed and service is stopped before
+    %  uninstalling process detecets and warns
         "   <CustomAction Id='UnInstallService'\n"
         "                 FileKey='"++CItm#item.id++"'\n"
         "                 ExeCommand='uninstall' Execute='deferred' Impersonate='no' />\n"
