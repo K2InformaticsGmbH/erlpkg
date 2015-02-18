@@ -54,6 +54,7 @@ main([Cmd]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";Cmd=="stop";
                                                     ++RootPath++"\"",
                               "-stopaction",    "\"init:stop().\""]);
         "uninstall" ->
+            run_port(ErlSrv, ["stop", AppName]),
             run_port(ErlSrv, ["remove", AppName]),
             run_port(filename:join([ErtsBin, "epmd.exe"]), ["-kill"]);
         "start" -> run_port(ErlSrv, ["start", AppName]);

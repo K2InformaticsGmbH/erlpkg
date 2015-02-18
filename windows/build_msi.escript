@@ -198,6 +198,14 @@ build_msi() ->
     build_sources(),
     rebar_generate(),
     ?L("OTP release prepared"),
+    case file:copy(?FNJ([C#config.topDir,"deps","erlpkg","windows",
+                         "service.escript"]),
+                   ?FNJ([C#config.tmpSrcDir,"rel",C#config.app,"bin",
+                         C#config.app++".escript"])) of
+        {error, Error} ->
+            exit({"failed to copy service.escript", Error});
+        _ -> ok
+    end,
     {ok, _} = dets:open_file(C#config.app++"ids",
                              [{ram_file, true},
                               {file, C#config.app++"ids.dets"}, {keypos, 2}]),
@@ -407,10 +415,16 @@ create_wxs() ->
     [EditConfEs] = dets:select(Tab, [{#item{type=component,
                                              name="editconfs.escript", _='_'},
                                        [], ['$_']}]),
-    [Comp] = dets:select(Tab, [{#item{type=component, name=Proj++".cmd", _='_'},
-                                [], ['$_']}]),
-    [CItm] = dets:select(Tab, [{#item{type=file, name=Proj++".cmd",
-                                      guid=undefined, _='_'}, [], ['$_']}]),
+    [SrvcCtrlEs] = dets:select(Tab, [{#item{type=component,
+                                            name=Proj++".escript", _='_'},
+                                      [], ['$_']}]),
+    [StartCleanBoot] = dets:select(Tab, [{#item{type=component,
+                                            name="start_clean.boot", _='_'},
+                                      [], ['$_']}]),
+    %[Comp] = dets:select(Tab, [{#item{type=component, name=Proj++".cmd", _='_'},
+    %                            [], ['$_']}]),
+    %[CItm] = dets:select(Tab, [{#item{type=file, name=Proj++".cmd",
+    %                                  guid=undefined, _='_'}, [], ['$_']}]),
 
     {ProgFolderId, ProgFolderGuId} = get_id(Verbose, Tab, component, 'PROGSMENUFOLDER_GUID', undefined),
     {DsktpShortId, DsktpShortGuId} = get_id(Verbose, Tab, component, 'DESKTOPSHORTCUT_GUID', undefined),
@@ -521,6 +535,7 @@ create_wxs() ->
     %% Service customization
     EscriptExePath = filename:split(EscriptExe#item.path),
     EditConfEsPath = filename:split(EditConfEs#item.path),
+    SrvcCtrlEsPath = filename:split(SrvcCtrlEs#item.path),
     ExecCommand = "\"[INSTALLDIR]"
                   ++ string:join(
                        lists:sublist(EscriptExePath
@@ -534,7 +549,20 @@ create_wxs() ->
                        ++ ["editconfs.escript"]
                        , "\\")
                   ++ "\"",
-                  
+
+    SrvcCommand = "\"[INSTALLDIR]"
+                  ++ string:join(
+                       lists:sublist(EscriptExePath
+                                     , length(EscriptExePath)-1, 2)
+                       ++ ["escript.exe"]
+                       , "\\")
+                  ++ "\" \"[INSTALLDIR]"
+                  ++ string:join(
+                       lists:sublist(SrvcCtrlEsPath
+                                     , length(SrvcCtrlEsPath), 1)
+                       ++ [Proj++".escript"]
+                       , "\\")
+                  ++ "\"",
     if Verbose ->
            io:format("BootDir~n"
                      "     name : ~s~n"
@@ -543,11 +571,10 @@ create_wxs() ->
                      , [BootDir#item.name
                         , BootDir#item.path
                         , BootDir#item.id]),
-            io:format("ConfigService CMD ~s~n"
-                      , [ExecCommand]);
+            io:format("ConfigService CMD ~s~n", [SrvcCommand]);
        true ->
-            io:format("ConfigService ~s @ ~s~n"
-                      , [ExecCommand, BootDir#item.path])
+            io:format("ConfigService ~s @ ~s~n",
+                      [SrvcCommand, BootDir#item.path])
     end,
 
     %% Service Installation
@@ -571,20 +598,23 @@ create_wxs() ->
     % Custom actions service install and start
     %  must run after InstallFiles step is 'comitted'
     ok = file:write(FileH,
-        "   <CustomAction Id='InstallService'\n"
-        "                 FileKey='"++CItm#item.id++"'\n"
-        "                 ExeCommand='install' Execute='commit' Impersonate='no' />\n"
-        "   <CustomAction Id='StartService' FileKey='"++CItm#item.id++"'\n"
-        "                 ExeCommand='start' Execute='commit' Impersonate='no' />\n"
+        "   <CustomAction Id='InstallService' Directory='"++BootDir#item.id++"'\n"
+        "                 ExeCommand='"++SrvcCommand++" install'\n"
+        "                 Execute='commit' Impersonate='no' />\n"
+        "   <CustomAction Id='StartService' Directory='"++BootDir#item.id++"'\n"
+        "                 ExeCommand='"++SrvcCommand++" start'\n"
+        "                 Execute='commit' Impersonate='no' />\n"
     % Custom actions service stop and uninstall
     %  must run immediately and before InstallValidate step to ensure that
     %  installed files are not removed and service is stopped before
     %  uninstalling process detecets and warns
-        "   <CustomAction Id='UnInstallService'\n"
-        "                 FileKey='"++CItm#item.id++"'\n"
-        "                 ExeCommand='uninstall' Execute='deferred' Impersonate='no' />\n"
-        "   <CustomAction Id='StopService' FileKey='"++CItm#item.id++"'\n"
-        "                 ExeCommand='stop' Execute='deferred' Impersonate='no' />\n\n"),
+    %  Execute='deferred' is MUST to enforce immediate elivated execution
+        "   <CustomAction Id='UnInstallService' Directory='"++BootDir#item.id++"'\n"
+        "                 ExeCommand='"++SrvcCommand++" uninstall'\n"
+        "                 Execute='deferred' Impersonate='no' />\n"
+        "   <CustomAction Id='StopService' Directory='"++BootDir#item.id++"'\n"
+        "                 ExeCommand='"++SrvcCommand++" stop'\n"
+        "                 Execute='deferred' Impersonate='no' />\n\n"),
 
     ?L("added service control custom actions"),
 
@@ -598,17 +628,21 @@ create_wxs() ->
     %  Ref http://wix.tramontana.co.hu/tutorial/com-expression-syntax-miscellanea/expression-syntax
     ok = file:write(FileH,
         "   <InstallExecuteSequence>\n"
-        "      <Custom Action='StopService' After='InstallInitialize'>"
-                "$"++Comp#item.id++"=2</Custom>\n"
-        "      <Custom Action='UnInstallService' After='StopService'>"
-                "$"++Comp#item.id++"=2</Custom>\n"
-        "      <Custom Action='ConfigService' After='InstallFiles'>"
-                "$"++EscriptExe#item.id++"=3 AND "
-                "$"++EditConfEs#item.id++"=3</Custom>\n"
-        "      <Custom Action='InstallService' After='ConfigService'>"
-                "$"++Comp#item.id++"=3</Custom>\n"
-        "      <Custom Action='StartService' After='InstallService'>"
-                "$"++Comp#item.id++"=3</Custom>\n"
+        "      <Custom Action='StopService' After='InstallInitialize'><![CDATA["
+                "($"++EscriptExe#item.id++"=2) AND "
+                "($"++SrvcCtrlEs#item.id++"=2)]]></Custom>\n"
+        "      <Custom Action='UnInstallService' After='StopService'><![CDATA["
+                "($"++EscriptExe#item.id++"=2) AND "
+                "($"++SrvcCtrlEs#item.id++"=2)]]></Custom>\n"
+        "      <Custom Action='ConfigService' After='InstallFiles'><![CDATA["
+                "($"++EscriptExe#item.id++"=3) AND "
+                "($"++EditConfEs#item.id++"=3)]]></Custom>\n"
+        "      <Custom Action='InstallService' After='ConfigService'><![CDATA["
+                "($"++EscriptExe#item.id++"=3) AND "
+                "($"++SrvcCtrlEs#item.id++"=3)]]></Custom>\n"
+        "      <Custom Action='StartService' After='InstallService'><![CDATA["
+                "($"++EscriptExe#item.id++"=3) AND "
+                "($"++SrvcCtrlEs#item.id++"=3)]]></Custom>\n"
         "   </InstallExecuteSequence>\n\n"),
 
     ?L("added service start/stop sequence for install/uninstall"),
@@ -618,17 +652,17 @@ create_wxs() ->
         "       <Component Id='"++ProgFolderId++"' Guid='"++ProgFolderGuId++"'>\n"
         "           <Shortcut Id='programattach'\n"
         "                     Name='"++Proj++" Attach'\n"
-        "                     Target='[#"++CItm#item.id++"]'\n"
-        "                     Arguments='attach'\n"
+        "                     Target='[#"++EscriptExe#item.id++"]'\n"
+        "                     Arguments='[#"++SrvcCtrlEs#item.id++"] attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
         "           <Shortcut Id='programgui'\n"
         "                     Name='"++Proj++" GUI'\n"
-        "                     Target='[#"++CItm#item.id++"]'\n"
-        "                     Arguments='console'\n"
+        "                     Target='[#"++EscriptExe#item.id++"]'\n"
+        "                     Arguments='[#"++SrvcCtrlEs#item.id++"] console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
-        "           <RemoveFolder Id='ApplicationProgramMenuFolder' On='uninstall' />\n"
+        "           <RemoveFolder Id='ApplicationProgramMenuFolder' On='uninstall'/>\n"
         "           <RegistryValue Root='HKCU'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='programmenu' Type='string'\n"
@@ -643,14 +677,14 @@ create_wxs() ->
         "       <Component Id='"++DsktpShortId++"' Guid='"++DsktpShortGuId++"'>\n"
         "           <Shortcut Id='desktopattach'\n"
         "                     Name='"++Proj++" Attach'\n"
-        "                     Target='[#"++CItm#item.id++"]'\n"
-        "                     Arguments='attach'\n"
+        "                     Target='[#"++EscriptExe#item.id++"]'\n"
+        "                     Arguments='[#"++SrvcCtrlEs#item.id++"] attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
         "           <Shortcut Id='desktopgui'\n"
         "                     Name='"++Proj++" GUI'\n"
-        "                     Target='[#"++CItm#item.id++"]'\n"
-        "                     Arguments='console'\n"
+        "                     Target='[#"++EscriptExe#item.id++"]'\n"
+        "                     Arguments='[#"++SrvcCtrlEs#item.id++"] console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationDesktopFolder' On='uninstall'/>\n"
