@@ -412,19 +412,16 @@ create_wxs() ->
                                    ['$_']}]),
     [EscriptExe] = dets:select(Tab, [{#item{type=component, name="escript.exe",
                                             _='_'}, [], ['$_']}]),
+    [EscriptExeFile] = dets:select(Tab, [{#item{type=file, name="escript.exe",
+                                            guid=undefined, _='_'}, [], ['$_']}]),
     [EditConfEs] = dets:select(Tab, [{#item{type=component,
                                              name="editconfs.escript", _='_'},
                                        [], ['$_']}]),
     [SrvcCtrlEs] = dets:select(Tab, [{#item{type=component,
                                             name=Proj++".escript", _='_'},
                                       [], ['$_']}]),
-    [StartCleanBoot] = dets:select(Tab, [{#item{type=component,
-                                            name="start_clean.boot", _='_'},
-                                      [], ['$_']}]),
-    %[Comp] = dets:select(Tab, [{#item{type=component, name=Proj++".cmd", _='_'},
-    %                            [], ['$_']}]),
-    %[CItm] = dets:select(Tab, [{#item{type=file, name=Proj++".cmd",
-    %                                  guid=undefined, _='_'}, [], ['$_']}]),
+    [SrvcCtrlEsFile] = dets:select(Tab, [{#item{type=file, name=Proj++".escript",
+                                                guid=undefined, _='_'}, [], ['$_']}]),
 
     {ProgFolderId, ProgFolderGuId} = get_id(Verbose, Tab, component, 'PROGSMENUFOLDER_GUID', undefined),
     {DsktpShortId, DsktpShortGuId} = get_id(Verbose, Tab, component, 'DESKTOPSHORTCUT_GUID', undefined),
@@ -652,14 +649,14 @@ create_wxs() ->
         "       <Component Id='"++ProgFolderId++"' Guid='"++ProgFolderGuId++"'>\n"
         "           <Shortcut Id='programattach'\n"
         "                     Name='"++Proj++" Attach'\n"
-        "                     Target='[#"++EscriptExe#item.id++"]'\n"
-        "                     Arguments='[#"++SrvcCtrlEs#item.id++"] attach'\n"
+        "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
+        "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
         "           <Shortcut Id='programgui'\n"
         "                     Name='"++Proj++" GUI'\n"
-        "                     Target='[#"++EscriptExe#item.id++"]'\n"
-        "                     Arguments='[#"++SrvcCtrlEs#item.id++"] console'\n"
+        "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
+        "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationProgramMenuFolder' On='uninstall'/>\n"
@@ -677,14 +674,14 @@ create_wxs() ->
         "       <Component Id='"++DsktpShortId++"' Guid='"++DsktpShortGuId++"'>\n"
         "           <Shortcut Id='desktopattach'\n"
         "                     Name='"++Proj++" Attach'\n"
-        "                     Target='[#"++EscriptExe#item.id++"]'\n"
-        "                     Arguments='[#"++SrvcCtrlEs#item.id++"] attach'\n"
+        "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
+        "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
         "           <Shortcut Id='desktopgui'\n"
         "                     Name='"++Proj++" GUI'\n"
-        "                     Target='[#"++EscriptExe#item.id++"]'\n"
-        "                     Arguments='[#"++SrvcCtrlEs#item.id++"] console'\n"
+        "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
+        "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationDesktopFolder' On='uninstall'/>\n"
