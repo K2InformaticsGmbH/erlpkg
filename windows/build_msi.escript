@@ -3,10 +3,6 @@
 %%! -smp enable -mnesia debug verbose
 -include_lib("kernel/include/file.hrl").
 
--define(COMPANY, "K2 Informatics GmbH").
--define(PKG_COMMENT, "DDErl is a registered trademark of"
-                     " K2 Informatics GmbH").
-
 -define(H(__F), integer_to_list(erlang:phash2(__F), 16)).
 
 -define(TRACE,  io:format("TRACE ~p~n", [?LINE])).
@@ -18,7 +14,6 @@
               , path
               , file_info
         }).
-
 
 -define(E(__Fmt,__Args), io:format("[~p] "++__Fmt++"~n", [?LINE | __Args])).
 -define(E(__Fmt), ?E(__Fmt,[])).
@@ -46,13 +41,11 @@
 
 -define(FNJ(__Parts), filename:join(__Parts)).
 
--record(config, {app, desc, version, tmpSrcDir, topDir, rebar, candle, light, msiPath}).
+-record(config, {app, desc, version, tmpSrcDir, topDir, rebar, candle, light,
+                 msiPath, pkgName, pkgCompany, pkgComment}).
 
-main([]) -> main(false);
-main(["-v"]) -> main(true);
-main(V) when is_atom(V) ->
-    put(verbose, V),
-    io:format(user, "[~p] build_msi with verbose ~p~n", [?LINE, V]),
+main(main) ->
+    io:format(user, "[~p] build_msi with verbose ~p~n", [?LINE, get(verbose)]),
     ScriptPath = filename:absname(escript:script_name()),
     RootPath = case lists:reverse(filename:split(ScriptPath)) of
                    ["build_msi.escript", "windows", "erlpkg", "deps"
@@ -86,45 +79,16 @@ main(V) when is_atom(V) ->
     {App, Desc, Version} = app_info_from_app_src(AppSrcData),
     ReleaseTopDir = ?FNJ([RootPath, "rel", "erlpkg_release"]),
     case filelib:is_dir(ReleaseTopDir) of
-        false -> ok = file:make_dir(ReleaseTopDir);
+        false ->
+            ok = file:make_dir(ReleaseTopDir),
+            ?L("Created ~s", [ReleaseTopDir]);
         _ -> ok
     end,
     MsiPath = ?FNJ([ReleaseTopDir,"msi"]),
     case filelib:is_dir(MsiPath) of
-        false -> ok = file:make_dir(MsiPath);
-        _ -> ok
-    end,
-    % TODO
-    % Copying host specific files
-    % TO be optionally overridden by host application
-    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","ServiceSetupDlg.wxs"]),
-                   ?FNJ([MsiPath,"ServiceSetupDlg.wxs"])) of
-        {error, Error} ->
-            exit({"failed to copy ServiceSetupDlg.wxs", Error});
-        _ -> ok
-    end,
-    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","banner493x58.jpg"]),
-                   ?FNJ([MsiPath,"banner493x58.jpg"])) of
-        {error, Error1} ->
-            exit({"failed to copy banner493x58.jpg", Error1});
-        _ -> ok
-    end,
-    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","dialog493x312.jpg"]),
-                   ?FNJ([MsiPath,"dialog493x312.jpg"])) of
-        {error, Error2} ->
-            exit({"failed to copy dialog493x312.jpg", Error2});
-        _ -> ok
-    end,
-    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","dderl.ico"]),
-                   ?FNJ([MsiPath,"dderl.ico"])) of
-        {error, Error3} ->
-            exit({"failed to copy dderl.ico", Error3});
-        _ -> ok
-    end,
-    case file:copy(?FNJ([RootPath,"deps","erlpkg","windows","License.rtf"]),
-                   ?FNJ([MsiPath,"License.rtf"])) of
-        {error, Error4} ->
-            exit({"failed to copy License.rtf", Error4});
+        false ->
+            ok = file:make_dir(MsiPath),
+            ?L("Created ~s", [MsiPath]);
         _ -> ok
     end,
     AppStr = atom_to_list(App),
@@ -133,15 +97,87 @@ main(V) when is_atom(V) ->
                    tmpSrcDir = ?FNJ([ReleaseTopDir, AppStr++"-"++Version]),
                    msiPath = MsiPath},
     put(config, Conf),
+
+    % Copying application specific files
+    [begin
+         copy_first_time(F),
+         copy_to_msi(F)
+     end || F <- ["ServiceSetupDlg.wxs", "banner493x58.jpg",
+                  "dialog493x312.jpg", "application.ico", "License.rtf"]],
+    copy_first_time("erlpkg.conf"),
+    {ok, Config} = file:consult(?FNJ([RootPath,"rel","files","erlpkg.conf"])),
+    PkgName = case proplists:get_value(name, Config, '$not_found') of
+                  '$not_found' -> "Application Name";
+                  PName -> PName
+              end,
+    PkgCompany = case proplists:get_value(company, Config, '$not_found') of
+                  '$not_found' -> "Name of the Company";
+                  Comp -> Comp
+              end,
+    PkgComment = case proplists:get_value(comment, Config, '$not_found') of
+                  '$not_found' -> PkgName++" is a registered trademark of "++PkgCompany;
+                  PCmnt -> PCmnt
+              end,
+    put(config, Conf#config{pkgName = PkgName, pkgCompany = PkgCompany, pkgComment = PkgComment}),
     C = get(config),
+    ?L("--------------------------------------------------------------------------------"),
     ?L("packaging ~p (~s) of version ~s", [C#config.app, C#config.desc, C#config.version]),
-    ?L("app root: ~s", [C#config.topDir]),
-    ?L("tmp src: ~s", [C#config.tmpSrcDir]),
-    ?L("MSI path: ~s", [C#config.msiPath]),
-    ?L("rebar: ~s", [C#config.rebar]),
-    ?L("candle.exe: ~s", [C#config.candle]),
-    ?L("light.exe: ~s", [C#config.light]),
-    build_msi().
+    ?L("--------------------------------------------------------------------------------"),
+    ?L("name        : ~s", [C#config.pkgName]),
+    ?L("company     : ~s", [C#config.pkgCompany]),
+    ?L("comment     : ~s", [C#config.pkgComment]),
+    ?L("app root    : ~s", [C#config.topDir]),
+    ?L("tmp src     : ~s", [C#config.tmpSrcDir]),
+    ?L("MSI path    : ~s", [C#config.msiPath]),
+    ?L("rebar       : ~s", [C#config.rebar]),
+    ?L("candle.exe  : ~s", [C#config.candle]),
+    ?L("light.exe   : ~s", [C#config.light]),
+    ?L("--------------------------------------------------------------------------------"),
+    build_msi();
+main(Opts) when length(Opts) > 0 ->
+    case lists:member("-v", Opts) of
+        true -> put(verbose, true);
+        false -> put(verbose, false)
+    end,
+    case lists:member("-sb", Opts) of
+        true -> put(skip_build, true);
+        false -> put(skip_build, false)
+    end,
+    case lists:member("-sg", Opts) of
+        true -> put(skip_generate, true);
+        false -> put(skip_generate, false)
+    end,
+    main(main);
+main([]) ->
+    put(verbose, false),
+    put(skip_build, false),
+    put(skip_generate, false),
+    main(main).
+
+copy_first_time(File) ->
+    C = get(config),
+    case filelib:is_file(?FNJ([C#config.topDir,"rel","files",File])) of
+        true ->
+            ?L("override for ~s found in rel/files", [File]);
+        false ->
+            case file:copy(?FNJ([C#config.topDir,"deps","erlpkg","windows",File]),
+                           ?FNJ([C#config.topDir,"rel","files",File])) of
+                {error, Error} ->
+                    exit({"failed to copy "++File, Error});
+                {ok, _BytesCopied} ->
+                   ?L("copied ~s to rel/files", [File])
+            end
+    end.
+
+copy_to_msi(File) ->
+    C = get(config),
+    case file:copy(?FNJ([C#config.topDir,"rel","files",File]),
+                   ?FNJ([C#config.msiPath,File])) of
+        {error, Error} ->
+            exit({"failed to copy "++File, Error});
+        {ok, _BytesCopied} ->
+            ?L("copied ~s to ~s", [File, C#config.msiPath])
+    end.
 
 get_app_src(SDir) ->
     case filelib:wildcard("*.app.src", SDir) of
@@ -195,9 +231,20 @@ app_info_from_app_src(AppSrcData) ->
 
 build_msi() ->
     C = get(config),
-    build_sources(),
-    rebar_generate(),
-    ?L("OTP release prepared"),
+    case get(skip_build) of
+        false ->
+            build_sources(),
+            ?L("source tree built");
+        _ ->
+            ?L("skipped source tree build")
+    end,
+    case get(skip_generate) of
+        false ->
+            rebar_generate(),
+            ?L("OTP release prepared");
+        _ ->
+            ?L("skipped rebar generate")
+    end,
     case file:copy(?FNJ([C#config.topDir,"deps","erlpkg","windows",
                          "service.escript"]),
                    ?FNJ([C#config.tmpSrcDir,"rel",C#config.app,"bin",
@@ -336,24 +383,24 @@ create_wxs() ->
                     filename:join([C#config.msiPath,
                                    lists:flatten([Proj,"-",Version,".wxs"])]),
                     [write, raw]),
-    {ok, PRODUCT_GUID} = get_id(Verbose, Tab, undefined, 'PRODUCT_GUID', undefined),
-    {ok, UPGRADE_GUID} = get_id(Verbose, Tab, undefined, 'UPGRADE_GUID', undefined),
-    {ok, ID} = get_id(Verbose, Tab, undefined, ?COMPANY, undefined),
+    {ok, PRODUCT_GUID} = get_id(Tab, undefined, 'PRODUCT_GUID', undefined),
+    {ok, UPGRADE_GUID} = get_id(Tab, undefined, 'UPGRADE_GUID', undefined),
+    {ok, ID} = get_id(Tab, undefined, C#config.pkgCompany, undefined),
     ok = file:write(FileH,
         "<?xml version='1.0' encoding='windows-1252'?>\n"
         "<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>\n\n"
 
-        "<Product Name='"++Proj++" "++Version++"'\n"
+        "<Product Name='"++C#config.pkgName++"'\n"
         "         Id='"++PRODUCT_GUID++"'\n"
         "         UpgradeCode='"++UPGRADE_GUID++"'\n"
         "         Language='1033' Codepage='1252' Version='"++Version++"'\n"
-        "         Manufacturer='"?COMPANY"'>\n\n"
+        "         Manufacturer='"++C#config.pkgCompany++"'>\n\n"
 
         "   <Package Id='*'\n"
         "            Keywords='Installer'\n"
-        "            Description=\""?COMPANY"\"\n"
-        "            Comments='"?PKG_COMMENT"'\n"
-        "            Manufacturer='"?COMPANY"'\n"
+        "            Description=\""++C#config.pkgCompany++"\"\n"
+        "            Comments='"++C#config.pkgComment++"'\n"
+        "            Manufacturer='"++C#config.pkgCompany++"'\n"
         "            InstallerVersion='200' Languages='1033'\n"
         "            Compressed='yes'\n"
         "            InstallScope='perMachine'\n"
@@ -363,7 +410,7 @@ create_wxs() ->
         "   <Media Id='1' Cabinet='"++Proj++".cab' EmbedCab='yes'\n"
         "          DiskPrompt='CD-ROM #1'/>\n"
         "   <Property Id='DiskPrompt'\n"
-        "             Value=\""?COMPANY" "++Proj++" Installation [1]\"/>\n\n"),
+        "             Value=\""++C#config.pkgCompany++" "++Proj++" Installation [1]\"/>\n\n"),
 
     ?L("wxs header sections created"),
 
@@ -371,11 +418,11 @@ create_wxs() ->
         "   <Directory Id='TARGETDIR' Name='SourceDir'>\n"),
 
     % AppData PATH
-    {CoDatId, CoDatGuId} = get_id(Verbose, Tab, component, 'COMPANYDAT_GUID', undefined),
-    {AppDatId, AppDatGuId} = get_id(Verbose, Tab, component, 'PRODUCTDAT_GUID', undefined),
+    {CoDatId, CoDatGuId} = get_id(Tab, component, 'COMPANYDAT_GUID', undefined),
+    {AppDatId, AppDatGuId} = get_id(Tab, component, 'PRODUCTDAT_GUID', undefined),
     ok = file:write(FileH,
         "     <Directory Id='CommonAppDataFolder' Name='CommonAppData'>\n"
-        "       <Directory Id='COMPANYDAT' Name='"?COMPANY"'>\n"
+        "       <Directory Id='COMPANYDAT' Name='"++C#config.pkgCompany++"'>\n"
         "         <Component Id='"++CoDatId++"' Guid='"++CoDatGuId++"'>\n"
         "           <CreateFolder Directory='COMPANYDAT'>\n"
         "             <Permission User='Everyone' GenericAll='yes' />\n"
@@ -394,10 +441,10 @@ create_wxs() ->
     % ProgramFiles PATH
     ok = file:write(FileH,
         "     <Directory Id='ProgramFilesFolder' Name='PFiles'>\n"
-        "       <Directory Id='"++ID++"' Name='"?COMPANY"'>\n"
+        "       <Directory Id='"++ID++"' Name='"++C#config.pkgCompany++"'>\n"
         "         <Directory Id='INSTALLDIR' Name='"++Proj++"'>\n"),
 
-    walk_release(Verbose, Proj, Tab, FileH, Root),
+    walk_release(Proj, Tab, FileH, Root),
     ?L("finished walking OTP release"),
     
     ok = file:write(FileH,
@@ -423,8 +470,8 @@ create_wxs() ->
     [SrvcCtrlEsFile] = dets:select(Tab, [{#item{type=file, name=Proj++".escript",
                                                 guid=undefined, _='_'}, [], ['$_']}]),
 
-    {ProgFolderId, ProgFolderGuId} = get_id(Verbose, Tab, component, 'PROGSMENUFOLDER_GUID', undefined),
-    {DsktpShortId, DsktpShortGuId} = get_id(Verbose, Tab, component, 'DESKTOPSHORTCUT_GUID', undefined),
+    {ProgFolderId, ProgFolderGuId} = get_id(Tab, component, 'PROGSMENUFOLDER_GUID', undefined),
+    {DsktpShortId, DsktpShortGuId} = get_id(Tab, component, 'DESKTOPSHORTCUT_GUID', undefined),
 
     ok = file:write(FileH,
         "     <Directory Id='ProgramMenuFolder' Name='Programs'>\n"
@@ -446,7 +493,7 @@ create_wxs() ->
 
     ?L("finished TARGETDIR section"),
 
-    build_features(Verbose, Proj, Version, FileH),
+    build_features(Proj, Version, FileH),
 
     ?L("feature sections created"),
 
@@ -652,13 +699,13 @@ create_wxs() ->
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
-        "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
+        "                     Icon='application.ico' IconIndex='0' />\n"
         "           <Shortcut Id='programgui'\n"
         "                     Name='"++Proj++" GUI'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
-        "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
+        "                     Icon='application.ico' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationProgramMenuFolder' On='uninstall'/>\n"
         "           <RegistryValue Root='HKCU'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
@@ -677,13 +724,13 @@ create_wxs() ->
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
-        "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
+        "                     Icon='application.ico' IconIndex='0' />\n"
         "           <Shortcut Id='desktopgui'\n"
         "                     Name='"++Proj++" GUI'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
-        "                     Icon='"++Proj++".ico' IconIndex='0' />\n"
+        "                     Icon='application.ico' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationDesktopFolder' On='uninstall'/>\n"
         "           <RegistryValue Root='HKCU'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
@@ -695,10 +742,10 @@ create_wxs() ->
     ?L("added short cuts to ApplicationDesktopFolder"),
 
     ok = file:write(FileH,
-        "   <Icon Id='"++Proj++".ico' SourceFile='"++Proj++".ico' />\n"),
+        "   <Icon Id='application.ico' SourceFile='application.ico' />\n"),
 
     ok = file:write(FileH,
-        "   <Property Id='ARPPRODUCTICON' Value='"++Proj++".ico' />"),
+        "   <Property Id='ARPPRODUCTICON' Value='application.ico' />"),
     
     ok = file:write(FileH,
         "</Product>\n"
@@ -740,33 +787,33 @@ generate_msi_name() ->
                             [Y,M,D,H,Mn,S]),
     lists:flatten([C#config.app,"-",C#config.version,"_",MsiDate,".msi"]).
 
-walk_release(Verbose, Proj, Tab, FileH, Root) ->
+walk_release(Proj, Tab, FileH, Root) ->
+    C = get(config),
     ReleaseRoot = filename:join([Root,"rel",Proj]),
     case filelib:is_dir(ReleaseRoot) of
         true ->
-            walk_release(Verbose, Tab, FileH,
+            walk_release(length(C#config.tmpSrcDir)+2, Tab, FileH,
                          filelib:wildcard("*", ReleaseRoot), ReleaseRoot, 12);
         false -> ?L("~p is not a directory", [ReleaseRoot])
     end.
 
-walk_release(_Verbose, _Tab, _FileH, [], _Dir, _N) -> ok;
-walk_release(Verbose, Tab, FileH, [F|Files], Dir, N) ->
+walk_release(_PathPrefixLen, _Tab, _FileH, [], _Dir, _N) -> ok;
+walk_release(PathPrefixLen, Tab, FileH, [F|Files], Dir, N) ->
     case filelib:is_dir(filename:join([Dir,F])) of
         true ->
             NewDirLevel = filename:join([Dir,F]),
             FilesAtThisLevel = filelib:wildcard("*", NewDirLevel),
-            {ok, DirId} = get_id(Verbose, Tab, dir, F, Dir),
+            {ok, DirId} = get_id(Tab, dir, F, Dir),
             ok = file:write(FileH, lists:duplicate(N,32)++
                             "<Directory Id='"++DirId++
                                             "' Name='"++F++"'>\n"),
-            walk_release(Verbose, Tab, FileH, FilesAtThisLevel, NewDirLevel,
-                         N+3),
+            walk_release(PathPrefixLen, Tab, FileH, FilesAtThisLevel, NewDirLevel, N+3),
             ok = file:write(FileH, lists:duplicate(N,32)++"</Directory>\n"),
-            ?L("~s/", [NewDirLevel]);
+            ?L("~s/", [string:substr(NewDirLevel, PathPrefixLen)]);
         false ->
             FilePath = get_filepath(Dir, F),
-            {Id, GuID} = get_id(Verbose, Tab, component, F, Dir),
-            {ok, FileId} = get_id(Verbose, Tab, file, F, Dir),
+            {Id, GuID} = get_id(Tab, component, F, Dir),
+            {ok, FileId} = get_id(Tab, file, F, Dir),
             ok = file:write(FileH, lists:duplicate(N+3,32)++
                 "<Component Id='"++Id++"' Guid='"++GuID++"'>\n"
                 ++lists:duplicate(N+3,32)++
@@ -775,9 +822,9 @@ walk_release(Verbose, Tab, FileH, [F|Files], Dir, N) ->
                 " KeyPath='yes' />\n"++lists:duplicate(N+3,32)++
                 "</Component>\n")
     end,
-    walk_release(Verbose, Tab, FileH, Files, Dir, N).
+    walk_release(PathPrefixLen, Tab, FileH, Files, Dir, N).
 
-build_features(_Verbose, Proj, Version, FileH) ->
+build_features(Proj, Version, FileH) ->
     Tab = Proj++"ids",
     ok = file:write(FileH,
         "   <Feature Id='Complete' Title='"++Proj++"-"++Version++"'"
@@ -799,7 +846,7 @@ build_features(_Verbose, Proj, Version, FileH) ->
     ok = file:write(FileH, "      </Feature>\n\n"),
     ok = file:write(FileH, "   </Feature>\n\n").
 
-get_id(_Verbose, Tab, undefined, Field, undefined) when is_list(Field) ->
+get_id(Tab, undefined, Field, undefined) when is_list(Field) ->
     Id = "id_"++?H(Field),
     case dets:lookup(Tab, Id) of
         [] ->
@@ -809,7 +856,7 @@ get_id(_Verbose, Tab, undefined, Field, undefined) when is_list(Field) ->
         [#item{} = Item] ->
             {ok, Item#item.id}
     end;
-get_id(_Verbose, Tab, Type, Field, undefined) when is_atom(Field) ->
+get_id(Tab, Type, Field, undefined) when is_atom(Field) ->
     Id = "id_"++?H(Field),
     case dets:lookup(Tab, Id) of
         [] ->
@@ -828,7 +875,7 @@ get_id(_Verbose, Tab, Type, Field, undefined) when is_atom(Field) ->
                 _ -> {ok, Item#item.guid}
             end
     end;
-get_id(_Verbose, Tab, Type, F, Dir)
+get_id(Tab, Type, F, Dir)
   when Type =:= component;
        Type =:= file;
        Type =:= dir ->
