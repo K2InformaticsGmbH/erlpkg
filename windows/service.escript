@@ -2,11 +2,10 @@
 %% -*- erlang -*-
 %%! -smp enable
 
-main([Cmd]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";Cmd=="stop";
-                 Cmd=="restart";Cmd=="console";Cmd=="query";Cmd=="attach";
-                 Cmd=="upgrade" ->
+main([Cmd|CmdParams]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";
+                           Cmd=="stop";Cmd=="restart";Cmd=="console";
+                           Cmd=="query";Cmd=="attach";Cmd=="upgrade" ->
     ScriptFile = escript:script_name(),
-    AppName = filename:basename(ScriptFile, ".escript"),
     RootPath = case lists:reverse(
                       filename:split(
                         filename:absname(filename:dirname(ScriptFile))
@@ -41,12 +40,14 @@ main([Cmd]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";Cmd=="stop";
                           VmArgsPropsInt
                   end,
     NodeName = proplists:get_value("-name", VmArgsProps),
+    AppName = filename:basename(ScriptFile, ".escript"),
+    [SrvName|_] = CmdParams,
     case Cmd of
         "install" ->
             StartErl = filename:join([RootPath, "bin", "start_erl.cmd"]),
-            run_port(ErlSrv, ["add",            AppName,
-                              "-c",             "\"Application "++AppName
-                                                    ++" in "++RootPath++"\"",
+            [_,ServiceDescription|_] = CmdParams,
+            run_port(ErlSrv, ["add",            SrvName,
+                              "-c",             ServiceDescription,
                               "-name",          NodeName,
                               "-w",             "\""++RootPath++"\"",
                               "-m",             "\""++StartErl++"\"",     
@@ -54,12 +55,12 @@ main([Cmd]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";Cmd=="stop";
                                                     ++RootPath++"\"",
                               "-stopaction",    "\"init:stop().\""]);
         "uninstall" ->
-            run_port(ErlSrv, ["stop", AppName]),
-            run_port(ErlSrv, ["remove", AppName]),
+            run_port(ErlSrv, ["stop", SrvName]),
+            run_port(ErlSrv, ["remove", SrvName]),
             run_port(filename:join([ErtsBin, "epmd.exe"]), ["-kill"]);
-        "start" -> run_port(ErlSrv, ["start", AppName]);
-        "stop" -> run_port(ErlSrv, ["stop", AppName]);
-        "query" -> run_port(ErlSrv, ["list", AppName]);
+        "start" -> run_port(ErlSrv, ["start", SrvName]);
+        "stop" -> run_port(ErlSrv, ["stop", SrvName]);
+        "query" -> run_port(ErlSrv, ["list", SrvName]);
         "console" ->
             NodeBootScript = filename:join([ReleaseDir, AppVsn, AppName]),
             SysConfig = filename:join([ReleaseDir, AppVsn, "sys.config"]),
@@ -77,8 +78,8 @@ main([Cmd]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";Cmd=="stop";
                                                                 VmArgsProps)
                            ]);
         "restart" ->
-            main(["stop"]),
-            main(["start"]);
+            main(["stop"|Rest]),
+            main(["start"|Rest]);
         "upgrade" ->
             io:format("ERROR: not supported yet~n")
     end;

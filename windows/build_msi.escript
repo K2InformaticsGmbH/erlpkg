@@ -309,24 +309,25 @@ build_sources() ->
            ++C#config.tmpSrcDir++"\""),
     ok = file:write_file(filename:join(C#config.tmpSrcDir,"rebar.bat"),
                          <<"rebar.cmd %*\n">>),
-    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["include"], "*.*"),
-    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["src"], "*.*"),
-    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["docs"], "*.*"),
-    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["rel"], "*.*"),
-    copy_folder(C#config.topDir, C#config.tmpSrcDir, ["rel", "files"], "*"),
+    PathPrfxLen = length(C#config.topDir)+2,
+    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["include"], "*.*"),
+    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["src"], "*.*"),
+    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["docs"], "*.*"),
+    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["rel"], "*.*"),
+    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["rel", "files"], "*"),
 
     Priv = filename:join(C#config.tmpSrcDir, "priv"),
     ok = file:make_dir(Priv),
-    copy_deep(filename:join([C#config.topDir, "priv"]), Priv),
+    copy_deep(PathPrfxLen, filename:join([C#config.topDir, "priv"]), Priv),
     
     Deps = filename:join(C#config.tmpSrcDir, "deps"),
     ok = file:make_dir(Deps),
-    copy_deep(filename:join([C#config.topDir, "deps"]), Deps).
+    copy_deep(PathPrfxLen, filename:join([C#config.topDir, "deps"]), Deps).
 
-copy_folder(Src, Target, Folders, Match) ->
+copy_folder(PathPrefixLen, Src, Target, Folders, Match) ->
     ok = file:make_dir(filename:join([Target|Folders])),
-    SrcFolder = filename:join([Src|Folders]),
-    ?L("cp ~s", [SrcFolder]),
+    SrcFolder = filename:join([Src|Folders]),    
+    ?L("cp ~s", [string:substr(SrcFolder, PathPrefixLen)]),
     [begin
          Source = filename:join(SrcFolder,F),
          IsFile = (filelib:is_dir(Source) == false andalso
@@ -338,7 +339,7 @@ copy_folder(Src, Target, Folders, Match) ->
          end
      end || F <- filelib:wildcard(Match, SrcFolder)].
 
-copy_deep(ProjDep, TargetDep) ->
+copy_deep(PathPrefixLen, ProjDep, TargetDep) ->
     [case D of
         ".git" -> skip;
         "ebin" -> skip;
@@ -348,9 +349,9 @@ copy_deep(ProjDep, TargetDep) ->
              Dst = filename:join(TargetDep, D),
              case filelib:is_dir(Src) of
                  true ->
-                     ?L("cp ~s", [Src]),
+                     ?L("cp ~s", [string:substr(Src, PathPrefixLen)]),
                      ok = file:make_dir(Dst),
-                     copy_deep(Src, Dst);
+                     copy_deep(PathPrefixLen, Src, Dst);
                  false ->
                      {ok, #file_info{mode = Mode}} = file:read_file_info(Src),
                      {ok, _} = file:copy(Src, Dst),
@@ -428,7 +429,7 @@ create_wxs() ->
         "             <Permission User='Everyone' GenericAll='yes' />\n"
         "           </CreateFolder>\n"
         "         </Component>\n"
-        "         <Directory Id='PRODUCTDAT' Name='"++Proj++"'>\n"
+        "         <Directory Id='PRODUCTDAT' Name='"++C#config.pkgName++"'>\n"
         "           <Component Id='"++AppDatId++"' Guid='"++AppDatGuId++"'>\n"
         "             <CreateFolder Directory='PRODUCTDAT'>\n"
         "               <Permission User='Everyone' GenericAll='yes' />\n"
@@ -436,13 +437,13 @@ create_wxs() ->
         "           </Component>\n"
         "         </Directory> <!-- PRODUCT -->\n"
         "       </Directory> <!-- COMPANY -->\n"
-        "     </Directory> <!-- AppDataFolder -->\n\n"),
+        "     </Directory> <!-- CommonAppDataFolder -->\n\n"),
 
     % ProgramFiles PATH
     ok = file:write(FileH,
         "     <Directory Id='ProgramFilesFolder' Name='PFiles'>\n"
         "       <Directory Id='"++ID++"' Name='"++C#config.pkgCompany++"'>\n"
-        "         <Directory Id='INSTALLDIR' Name='"++Proj++"'>\n"),
+        "         <Directory Id='INSTALLDIR' Name='"++C#config.pkgName++"'>\n"),
 
     walk_release(Proj, Tab, FileH, Root),
     ?L("finished walking OTP release"),
@@ -476,14 +477,14 @@ create_wxs() ->
     ok = file:write(FileH,
         "     <Directory Id='ProgramMenuFolder' Name='Programs'>\n"
         "        <Directory Id='ApplicationProgramMenuFolder'\n"
-        "                   Name='"++Proj++"' />\n"
+        "                   Name='"++C#config.pkgName++"' />\n"
         "     </Directory> <!-- ProgramMenuFolder -->\n\n"),
 
     ?L("finished ProgramMenuFolder section"),
 
     ok = file:write(FileH,
         "     <Directory Id='DesktopFolder' Name='Desktop'>\n"
-        "       <Directory Id='ApplicationDesktopFolder' Name='"++Proj++"'/>\n"
+        "       <Directory Id='ApplicationDesktopFolder' Name='"++C#config.pkgName++"'/>\n"
         "     </Directory> <!-- DesktopFolder -->\n\n"),
 
     ?L("finished DesktopFolder section"),
@@ -607,19 +608,8 @@ create_wxs() ->
                        ++ [Proj++".escript"]
                        , "\\")
                   ++ "\"",
-    if Verbose ->
-           io:format("BootDir~n"
-                     "     name : ~s~n"
-                     "     path : ~s~n"
-                     "     id   : ~s~n"
-                     , [BootDir#item.name
-                        , BootDir#item.path
-                        , BootDir#item.id]),
-            io:format("ConfigService CMD ~s~n", [SrvcCommand]);
-       true ->
-            io:format("ConfigService ~s @ ~s~n",
-                      [SrvcCommand, BootDir#item.path])
-    end,
+
+    ?L("service control ~s @ ~s", [SrvcCommand, BootDir#item.path]),
 
     %% Service Installation
 
@@ -643,10 +633,11 @@ create_wxs() ->
     %  must run after InstallFiles step is 'comitted'
     ok = file:write(FileH,
         "   <CustomAction Id='InstallService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" install'\n"
+        "                 ExeCommand='"++SrvcCommand++" install \""++C#config.pkgName++"\""
+                          " \""++C#config.desc++"\"'\n"
         "                 Execute='commit' Impersonate='no' />\n"
         "   <CustomAction Id='StartService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" start'\n"
+        "                 ExeCommand='"++SrvcCommand++" start \""++C#config.pkgName++"\"'\n"
         "                 Execute='commit' Impersonate='no' />\n"
     % Custom actions service stop and uninstall
     %  must run immediately and before InstallValidate step to ensure that
@@ -654,10 +645,10 @@ create_wxs() ->
     %  uninstalling process detecets and warns
     %  Execute='deferred' is MUST to enforce immediate elivated execution
         "   <CustomAction Id='UnInstallService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" uninstall'\n"
+        "                 ExeCommand='"++SrvcCommand++" uninstall \""++C#config.pkgName++"\"'\n"
         "                 Execute='deferred' Impersonate='no' />\n"
         "   <CustomAction Id='StopService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" stop'\n"
+        "                 ExeCommand='"++SrvcCommand++" stop \""++C#config.pkgName++"\"'\n"
         "                 Execute='deferred' Impersonate='no' />\n\n"),
 
     ?L("added service control custom actions"),
@@ -695,13 +686,13 @@ create_wxs() ->
         "   <DirectoryRef Id='ApplicationProgramMenuFolder'>\n"
         "       <Component Id='"++ProgFolderId++"' Guid='"++ProgFolderGuId++"'>\n"
         "           <Shortcut Id='programattach'\n"
-        "                     Name='"++Proj++" Attach'\n"
+        "                     Name='"++C#config.pkgName++" Attach'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <Shortcut Id='programgui'\n"
-        "                     Name='"++Proj++" GUI'\n"
+        "                     Name='"++C#config.pkgName++" GUI'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
@@ -720,13 +711,13 @@ create_wxs() ->
         "   <DirectoryRef Id='ApplicationDesktopFolder'>\n"
         "       <Component Id='"++DsktpShortId++"' Guid='"++DsktpShortGuId++"'>\n"
         "           <Shortcut Id='desktopattach'\n"
-        "                     Name='"++Proj++" Attach'\n"
+        "                     Name='"++C#config.pkgName++" Attach'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <Shortcut Id='desktopgui'\n"
-        "                     Name='"++Proj++" GUI'\n"
+        "                     Name='"++C#config.pkgName++" GUI'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
