@@ -367,9 +367,9 @@ rebar_generate() ->
     ?L("Entering ~s from ~s", [C#config.tmpSrcDir, CurDir]),
     ok = file:set_cwd(C#config.tmpSrcDir),
     ?L("Clean Compile and generate..."),
-    run_port("rebar.bat", ["clean"], C#config.tmpSrcDir),
-    run_port("rebar.bat", ["compile"], C#config.tmpSrcDir),
-    run_port("rebar.bat", ["generate", "skip_deps=true"], C#config.tmpSrcDir),
+    run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["clean"], C#config.tmpSrcDir),
+    run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["compile"], C#config.tmpSrcDir),
+    run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["generate", "skip_deps=true"], C#config.tmpSrcDir),
     ?L("Leaving ~s to ~s", [C#config.tmpSrcDir, CurDir]),
     ok = file:set_cwd(CurDir).
 
