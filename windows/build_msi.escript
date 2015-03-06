@@ -160,8 +160,15 @@ copy_first_time(File) ->
         true ->
             ?L("override for ~s found in rel/files", [File]);
         false ->
-            case file:copy(?FNJ([C#config.topDir,"deps","erlpkg","windows",File]),
-                           ?FNJ([C#config.topDir,"rel","files",File])) of
+            Src = ?FNJ([C#config.topDir,"deps","erlpkg","windows",File]),
+            Dst = ?FNJ([C#config.topDir,"rel","files",File]),
+            ?L("checking ~s", [Dst]),
+            case filelib:ensure_dir(Dst) of
+                ok -> ok;
+                {error, Error1} ->
+                    exit({"failed to create path for "++Dst, Error1})
+            end,
+            case file:copy(Src, Dst) of
                 {error, Error} ->
                     exit({"failed to copy "++File, Error});
                 {ok, _BytesCopied} ->
@@ -379,7 +386,6 @@ create_wxs() ->
     Proj = C#config.app,
     Version = C#config.version,
     Root = C#config.tmpSrcDir,
-    Verbose = get(verbose), 
     Tab = Proj++"ids",
     {ok, FileH} = file:open(
                     filename:join([C#config.msiPath,
