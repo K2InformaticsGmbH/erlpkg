@@ -41,7 +41,10 @@ main([Cmd|CmdParams]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";
                   end,
     NodeName = proplists:get_value("-name", VmArgsProps),
     AppName = filename:basename(ScriptFile, ".escript"),
-    [SrvName|_] = CmdParams,
+    case lists:member(Cmd, ["install", "uninstall", "start", "stop", "query"]) of
+        true -> [SrvName|_] = CmdParams;
+        false -> SrvName = ""
+    end,
     case Cmd of
         "install" ->
             StartErl = filename:join([RootPath, "bin", "start_erl.cmd"]),
