@@ -42,7 +42,7 @@
 -define(FNJ(__Parts), filename:join(__Parts)).
 
 -record(config, {app, desc, version, tmpSrcDir, topDir, rebar, candle, light,
-                 msiPath, pkgName, pkgCompany, pkgComment}).
+                 msiPath, pkgName, pkgCompany, pkgComment, privFolders}).
 
 main(main) ->
     io:format(user, "[~p] build_msi with verbose ~p~n", [?LINE, get(verbose)]),
@@ -118,7 +118,12 @@ main(main) ->
                   '$not_found' -> PkgName++" is a registered trademark of "++PkgCompany;
                   PCmnt -> PCmnt
               end,
-    put(config, Conf#config{pkgName = PkgName, pkgCompany = PkgCompany, pkgComment = PkgComment}),
+    PrivFolders = case proplists:get_value(privfolders, Config, '$not_found') of
+                  '$not_found' -> "*";
+                  PrivDirs -> PrivDirs
+              end,
+    put(config, Conf#config{pkgName = PkgName, pkgCompany = PkgCompany,
+                            pkgComment = PkgComment, privFolders = PrivFolders}),
     C = get(config),
     ?L("--------------------------------------------------------------------------------"),
     ?L("packaging ~p (~s) of version ~s", [C#config.app, C#config.desc, C#config.version]),
@@ -126,6 +131,7 @@ main(main) ->
     ?L("name        : ~s", [C#config.pkgName]),
     ?L("company     : ~s", [C#config.pkgCompany]),
     ?L("comment     : ~s", [C#config.pkgComment]),
+    ?L("priv dirs   : ~p", [C#config.privFolders]),
     ?L("app root    : ~s", [C#config.topDir]),
     ?L("tmp src     : ~s", [C#config.tmpSrcDir]),
     ?L("MSI path    : ~s", [C#config.msiPath]),
@@ -325,8 +331,18 @@ build_sources() ->
 
     Priv = filename:join(C#config.tmpSrcDir, "priv"),
     ok = file:make_dir(Priv),
-    copy_deep(PathPrfxLen, filename:join([C#config.topDir, "priv"]), Priv),
-    
+    case C#config.privFolders of
+        "*" ->
+            copy_deep(PathPrfxLen, filename:join([C#config.topDir, "priv"]), Priv);
+        Folders ->
+            [begin
+                 TargetDir = ?FNJ([Priv, Folder]),                 
+                 ok = file:make_dir(TargetDir),
+                 copy_deep(PathPrfxLen, ?FNJ([C#config.topDir, "priv", Folder]),
+                           TargetDir)
+             end || Folder <- Folders]
+    end,
+
     Deps = filename:join(C#config.tmpSrcDir, "deps"),
     ok = file:make_dir(Deps),
     copy_deep(PathPrfxLen, filename:join([C#config.topDir, "deps"]), Deps).
@@ -582,6 +598,14 @@ create_wxs() ->
         "   <Property Id='DBCLUSTERMGRS'><![CDATA["++ImemClustMgrs++"]]></Property>\n"
         "   <Property Id='DBINTF'>"++ImemIntf++":"++ImemPort++"</Property>\n\n"),
 
+    ok = file:write(FileH,
+        "   <!-- Existing install path -->\n"
+        "   <Property Id='EXISTINGINSTALLDIR' Secure='yes'>\n"
+        "       <RegistrySearch Id='Locate_EXISTINGINSTALLDIR' Root='HKCU'\n"
+        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                       Name='InstallPath' Type='directory' />\n"
+        "   </Property>\n\n"),
+
     ?L("added properties connecting to custom setup dialog"),
 
     %% Service customization
@@ -616,7 +640,26 @@ create_wxs() ->
                        , "\\")
                   ++ "\"",
 
+    InsldSrvcCmd = "\"[EXISTINGINSTALLDIR]"
+                  ++ string:join(
+                       lists:sublist(EscriptExePath
+                                     , length(EscriptExePath)-1, 2)
+                       ++ ["escript.exe"]
+                       , "\\")
+                  ++ "\" \"[EXISTINGINSTALLDIR]"
+                  ++ string:join(
+                       lists:sublist(SrvcCtrlEsPath
+                                     , length(SrvcCtrlEsPath), 1)
+                       ++ [Proj++".escript"]
+                       , "\\")
+                  ++ "\"",
+
     ?L("service control ~s @ ~s", [SrvcCommand, BootDir#item.path]),
+
+     %% Install Folder custom action
+     ok = file:write(FileH,
+         "   <CustomAction Id='Set_INSTALLDIR' Execute='firstSequence'\n"
+         "                 Property='INSTALLDIR' Value='[EXISTINGINSTALLDIR]' />\n\n"),
 
     %% Service Installation
 
@@ -652,10 +695,10 @@ create_wxs() ->
     %  uninstalling process detecets and warns
     %  Execute='deferred' is MUST to enforce immediate elivated execution
         "   <CustomAction Id='UnInstallService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" uninstall \""++C#config.pkgName++"\"'\n"
+        "                 ExeCommand='"++InsldSrvcCmd++" uninstall \""++C#config.pkgName++"\"'\n"
         "                 Execute='deferred' Impersonate='no' />\n"
         "   <CustomAction Id='StopService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" stop \""++C#config.pkgName++"\"'\n"
+        "                 ExeCommand='"++InsldSrvcCmd++" stop \""++C#config.pkgName++"\"'\n"
         "                 Execute='deferred' Impersonate='no' />\n\n"),
 
     ?L("added service control custom actions"),
@@ -670,24 +713,34 @@ create_wxs() ->
     %  Ref http://wix.tramontana.co.hu/tutorial/com-expression-syntax-miscellanea/expression-syntax
     ok = file:write(FileH,
         "   <InstallExecuteSequence>\n"
-        "      <Custom Action='StopService' After='InstallInitialize'><![CDATA["
-                "($"++EscriptExe#item.id++"=2) AND "
-                "($"++SrvcCtrlEs#item.id++"=2)]]></Custom>\n"
-        "      <Custom Action='UnInstallService' After='StopService'><![CDATA["
-                "($"++EscriptExe#item.id++"=2) AND "
-                "($"++SrvcCtrlEs#item.id++"=2)]]></Custom>\n"
-        "      <Custom Action='ConfigService' After='InstallFiles'><![CDATA["
-                "($"++EscriptExe#item.id++"=3) AND "
-                "($"++EditConfEs#item.id++"=3)]]></Custom>\n"
-        "      <Custom Action='InstallService' After='ConfigService'><![CDATA["
-                "($"++EscriptExe#item.id++"=3) AND "
-                "($"++SrvcCtrlEs#item.id++"=3)]]></Custom>\n"
-        "      <Custom Action='StartService' After='InstallService'><![CDATA["
-                "($"++EscriptExe#item.id++"=3) AND "
-                "($"++SrvcCtrlEs#item.id++"=3)]]></Custom>\n"
+        "       <Custom Action='Set_INSTALLDIR' After='FileCost'><![CDATA["
+                    "NOT Installed AND (NOT INSTALLDIR) AND "
+                    "EXISTINGINSTALLDIR]]></Custom>\n"
+        "       <Custom Action='StopService' After='InstallInitialize'><![CDATA["
+                    "($"++EscriptExe#item.id++"=2) AND "
+                    "($"++SrvcCtrlEs#item.id++"=2)]]></Custom>\n"
+        "       <Custom Action='UnInstallService' After='StopService'><![CDATA["
+                    "($"++EscriptExe#item.id++"=2) AND "
+                    "($"++SrvcCtrlEs#item.id++"=2)]]></Custom>\n"
+        "       <Custom Action='ConfigService' After='InstallFiles'><![CDATA["
+                    "($"++EscriptExe#item.id++"=3) AND "
+                    "($"++EditConfEs#item.id++"=3)]]></Custom>\n"
+        "       <Custom Action='InstallService' After='ConfigService'><![CDATA["
+                    "($"++EscriptExe#item.id++"=3) AND "
+                    "($"++SrvcCtrlEs#item.id++"=3)]]></Custom>\n"
+        "       <Custom Action='StartService' After='InstallService'><![CDATA["
+                    "($"++EscriptExe#item.id++"=3) AND "
+                    "($"++SrvcCtrlEs#item.id++"=3)]]></Custom>\n"
         "   </InstallExecuteSequence>\n\n"),
 
     ?L("added service start/stop sequence for install/uninstall"),
+
+    ok = file:write(FileH,
+        "   <InstallUISequence>\n"
+        "       <Custom Action='Set_INSTALLDIR' After='FileCost'><![CDATA["
+                    "NOT Installed AND (NOT INSTALLDIR) AND "
+                    "EXISTINGINSTALLDIR]]></Custom>\n"
+        "   </InstallUISequence>\n\n"),
 
     ok = file:write(FileH,
         "   <DirectoryRef Id='ApplicationProgramMenuFolder'>\n"
@@ -709,8 +762,12 @@ create_wxs() ->
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='programmenu' Type='string'\n"
         "                          Value='"++PRODUCT_GUID++"' KeyPath='yes'/>\n"
+        "           <RegistryValue Root='HKCU'\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                          Name='InstallPath' Type='string'\n"
+        "                          Value='[INSTALLDIR]' KeyPath='no'/>\n"
         "       </Component>\n"
-        "   </DirectoryRef>\n"),
+        "   </DirectoryRef>\n\n"),
 
     ?L("added short cuts to ApplicationProgramMenuFolder"),
 
