@@ -412,7 +412,8 @@ create_wxs() ->
     {ok, ID} = get_id(Tab, undefined, C#config.pkgCompany, undefined),
     ok = file:write(FileH,
         "<?xml version='1.0' encoding='windows-1252'?>\n"
-        "<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>\n\n"
+        "<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'"
+        "     xmlns:util='http://schemas.microsoft.com/wix/UtilExtension'>\n\n"
 
         "<Product Name='"++C#config.pkgName++"'\n"
         "         Id='"++PRODUCT_GUID++"'\n"
@@ -598,8 +599,8 @@ create_wxs() ->
         "   <Property Id='DBCLUSTERMGRS'><![CDATA["++ImemClustMgrs++"]]></Property>\n"
         "   <Property Id='DBINTF'>"++ImemIntf++":"++ImemPort++"</Property>\n\n"),
 
+    % Read real installation folder from registry if exists
     ok = file:write(FileH,
-        "   <!-- Existing install path -->\n"
         "   <Property Id='EXISTINGINSTALLDIR' Secure='yes'>\n"
         "       <RegistrySearch Id='Locate_EXISTINGINSTALLDIR' Root='HKCU'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
@@ -656,11 +657,6 @@ create_wxs() ->
 
     ?L("service control ~s @ ~s", [SrvcCommand, BootDir#item.path]),
 
-     %% Install Folder custom action
-     ok = file:write(FileH,
-         "   <CustomAction Id='Set_INSTALLDIR' Execute='firstSequence'\n"
-         "                 Property='INSTALLDIR' Value='[EXISTINGINSTALLDIR]' />\n\n"),
-
     %% Service Installation
 
     % Custom actions service configure
@@ -713,9 +709,6 @@ create_wxs() ->
     %  Ref http://wix.tramontana.co.hu/tutorial/com-expression-syntax-miscellanea/expression-syntax
     ok = file:write(FileH,
         "   <InstallExecuteSequence>\n"
-        "       <Custom Action='Set_INSTALLDIR' After='FileCost'><![CDATA["
-                    "NOT Installed AND (NOT INSTALLDIR) AND "
-                    "EXISTINGINSTALLDIR]]></Custom>\n"
         "       <Custom Action='StopService' After='InstallInitialize'><![CDATA["
                     "($"++EscriptExe#item.id++"=2) AND "
                     "($"++SrvcCtrlEs#item.id++"=2)]]></Custom>\n"
@@ -734,13 +727,6 @@ create_wxs() ->
         "   </InstallExecuteSequence>\n\n"),
 
     ?L("added service start/stop sequence for install/uninstall"),
-
-    ok = file:write(FileH,
-        "   <InstallUISequence>\n"
-        "       <Custom Action='Set_INSTALLDIR' After='FileCost'><![CDATA["
-                    "NOT Installed AND (NOT INSTALLDIR) AND "
-                    "EXISTINGINSTALLDIR]]></Custom>\n"
-        "   </InstallUISequence>\n\n"),
 
     ok = file:write(FileH,
         "   <DirectoryRef Id='ApplicationProgramMenuFolder'>\n"
@@ -762,10 +748,13 @@ create_wxs() ->
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='programmenu' Type='string'\n"
         "                          Value='"++PRODUCT_GUID++"' KeyPath='yes'/>\n"
+        % Remember real installation path in registry
         "           <RegistryValue Root='HKCU'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='InstallPath' Type='string'\n"
         "                          Value='[INSTALLDIR]' KeyPath='no'/>\n"
+        % Recursively remove application from path
+        "           <util:RemoveFolderEx On='uninstall' Property='EXISTINGINSTALLDIR' />\n"
         "       </Component>\n"
         "   </DirectoryRef>\n\n"),
 
@@ -817,12 +806,15 @@ candle_light() ->
     ok = file:set_cwd(C#config.msiPath),
     Wxses = filelib:wildcard("*.wxs"),
     ?L("candle with ~p", [Wxses]),
-    run_port(C#config.candle, if Verbose -> ["-v"]; true -> [] end ++ Wxses),
+    run_port(C#config.candle, if Verbose -> ["-v"]; true -> [] end
+             ++ ["-ext", "WixUtilExtension" | Wxses]),
     WixObjs = filelib:wildcard("*.wixobj"),
     MsiFile = generate_msi_name(),
     ?L("light ~s with ~p", [MsiFile, WixObjs]),
     run_port(C#config.light, if Verbose -> ["-v"]; true -> [] end
-             ++ ["-ext","WixUIExtension","-out",MsiFile | WixObjs]),
+             ++ ["-ext", "WixUtilExtension",
+                 "-ext", "WixUIExtension",
+                 "-out", MsiFile | WixObjs]),
     ok = file:set_cwd(CurDir).
 
 get_filepath(Dir, F) ->
