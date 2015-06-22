@@ -42,7 +42,7 @@
 -define(FNJ(__Parts), filename:join(__Parts)).
 
 -record(config, {app, desc, version, tmpSrcDir, topDir, rebar, candle, light,
-                 msiPath, pkgName, pkgCompany, pkgComment, privFolders}).
+                 msiPath, pkgName, pkgCompany, pkgComment, privFolders, upgradeCode}).
 
 main(main) ->
     io:format(user, "[~p] build_msi with verbose ~p~n", [?LINE, get(verbose)]),
@@ -122,8 +122,13 @@ main(main) ->
                   '$not_found' -> "*";
                   PrivDirs -> PrivDirs
               end,
+    UpgradeCode = case proplists:get_value(upgradecode, Config, '$not_found') of
+                  '$not_found' -> '$no_upgrade_code_defined';
+                  UpCode -> UpCode
+              end,
     put(config, Conf#config{pkgName = PkgName, pkgCompany = PkgCompany,
-                            pkgComment = PkgComment, privFolders = PrivFolders}),
+                            pkgComment = PkgComment, privFolders = PrivFolders,
+                            upgradeCode = UpgradeCode}),
     C = get(config),
     ?L("--------------------------------------------------------------------------------"),
     ?L("packaging ~p (~s) of version ~s", [C#config.app, C#config.desc, C#config.version]),
@@ -132,6 +137,7 @@ main(main) ->
     ?L("company     : ~s", [C#config.pkgCompany]),
     ?L("comment     : ~s", [C#config.pkgComment]),
     ?L("priv dirs   : ~p", [C#config.privFolders]),
+    ?L("upgrade     : ~p", [C#config.upgradeCode]),
     ?L("app root    : ~s", [C#config.topDir]),
     ?L("tmp src     : ~s", [C#config.tmpSrcDir]),
     ?L("MSI path    : ~s", [C#config.msiPath]),
@@ -408,7 +414,11 @@ create_wxs() ->
                                    lists:flatten([Proj,"-",Version,".wxs"])]),
                     [write, raw]),
     {ok, PRODUCT_GUID} = get_id(Tab, undefined, 'PRODUCT_GUID', undefined),
-    {ok, UPGRADE_GUID} = get_id(Tab, undefined, 'UPGRADE_GUID', undefined),
+    {ok, UPGRADE_GUID} = case C#config.upgradeCode of
+                             '$no_upgrade_code_defined' ->
+                                 get_id(Tab, undefined, 'UPGRADE_GUID', undefined);
+                             UpCode -> {ok, UpCode}
+                         end,
     {ok, ID} = get_id(Tab, undefined, C#config.pkgCompany, undefined),
     ok = file:write(FileH,
         "<?xml version='1.0' encoding='windows-1252'?>\n"
@@ -431,6 +441,9 @@ create_wxs() ->
         "            InstallScope='perMachine'\n"
         "            InstallPrivileges='elevated'\n"
         "            SummaryCodepage='1252' />\n\n"
+
+        "   <MajorUpgrade DowngradeErrorMessage='A later version of [ProductName]"
+                             " is already installed. Setup will now exit.' />\n\n"
 
         "   <Media Id='1' Cabinet='"++Proj++".cab' EmbedCab='yes'\n"
         "          DiskPrompt='CD-ROM #1'/>\n"
