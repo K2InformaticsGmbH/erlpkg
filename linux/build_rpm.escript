@@ -3,109 +3,48 @@
 %% ex: ft=erlang
 %%! -smp enable -sname build_rpm -mnesia debug verbose
 -include_lib("kernel/include/file.hrl").
-
--define(OSCMD(__Cmd),
-    (fun() ->
-        CR = os:cmd(__Cmd),
-        CmdResp = case lists:reverse(CR) of
-            [$\r,$\n|Rest] -> lists:reverse(Rest);
-            [$\n,$\r|Rest] -> lists:reverse(Rest);
-            [$\n|Rest] -> lists:reverse(Rest);
-            [$\r|Rest] -> lists:reverse(Rest);
-            _ -> CR
-        end,
-        io:format("[~p] "++__Cmd++": ~s~n", [?LINE, CmdResp]),
-        CmdResp
-    end)()
-).
-
--define(L(__Fmt,__Args), io:format("[~p] "++__Fmt++"~n", [?LINE | __Args])).
--define(L(__Fmt), ?L(__Fmt,[])).
-
--define(FNJ(__Parts), filename:join(__Parts)).
-
--record(config, {app, desc, version, tmpSrcDir, topDir, rebar, 
-                 rpmPath, pkgName, pkgCompany, pkgComment,
-         privFolders}).
+-include("../common.hrl").
 
 main(main) ->
-    io:format(user, "[~p] build_rpm with verbose ~p~n", [?LINE, get(verbose)]),
-    ScriptPath = filename:absname(escript:script_name()),
-    RootPath = case lists:reverse(filename:split(ScriptPath)) of
-                   ["build_rpm.escript", "linux", "erlpkg", "deps"
-                    | RootPathPartsRev] ->
-                       filename:join(lists:reverse(RootPathPartsRev));
-                   _ ->
-                       exit({"owner project path not found",
-                              ScriptPath})
-               end,
-    Rebar = case os:find_executable("rebar") of
-        false ->
-            case os:find_executable("rebar", RootPath) of
-                false -> exit("rebar not found");
-                R-> R
-            end;
-        R -> R
-    end,
-    SDir = ?FNJ([RootPath, "src"]),
-    AppSrcData = case filelib:is_dir(SDir) of
-                 false -> get_app_src_from_rebar_conf(RootPath);
-                 true -> get_app_src(SDir)
-             end,
-    {App, Desc, Version} = app_info_from_app_src(AppSrcData),
-    ReleaseTopDir = ?FNJ([RootPath, "rel", "erlpkg_release"]),
-    case filelib:is_dir(ReleaseTopDir) of
-        false ->
-            ok = file:make_dir(ReleaseTopDir),
-            ?L("Created ~s", [ReleaseTopDir]);
-        _ -> ok
-    end,
-    RpmPath = ?FNJ([ReleaseTopDir,"rpm"]),
-    case filelib:is_dir(RpmPath) of
-        false ->
-            ok = file:make_dir(RpmPath),
-            ?L("Created ~s", [RpmPath]);
-        _ -> ok
-    end,
-    AppStr = atom_to_list(App),
-    Conf = #config{app = AppStr, desc = Desc, rebar = Rebar,
-                   topDir = RootPath, version = Version,
-                   tmpSrcDir = ?FNJ([ReleaseTopDir, AppStr++"-"++Version]),
-                   rpmPath = RpmPath},
-    put(config, Conf),
+    ScriptPath = filename:dirname(escript:script_name()),
+    CmnLibMod = filename:join([ScriptPath, "..", "common"]),
+    case {file:read_file_info(CmnLibMod++".erl"),
+          file:read_file_info(CmnLibMod++".beam")} of
+        {{ok, #file_info{mtime = M1}},
+         {ok, #file_info{mtime = M2}}} when M1 =< M2 -> ok;
 
-    % Copying application specific files
-    copy_first_time("erlpkg.conf"),
-    {ok, Config} = file:consult(?FNJ([RootPath,"rel","files","erlpkg.conf"])),
-    PkgName = case proplists:get_value(name, Config, '$not_found') of
-                  '$not_found' -> "Application Name";
-                  PName -> PName
-              end,
-    PkgCompany = case proplists:get_value(company, Config, '$not_found') of
-                  '$not_found' -> "Name of the Company";
-                  Comp -> Comp
-              end,
-    PkgComment = case proplists:get_value(comment, Config, '$not_found') of
-                  '$not_found' -> PkgName++" is a registered trademark of "++PkgCompany;
-                  PCmnt -> PCmnt
-              end,
-    PrivFolders = case proplists:get_value(privfolders, Config, '$not_found') of
-                  '$not_found' -> "*";
-                  PrivDirs -> PrivDirs
-              end,
-    put(config, Conf#config{pkgName = PkgName, pkgCompany = PkgCompany,
-                            pkgComment = PkgComment, privFolders = PrivFolders}),
+        _ ->
+            case compile:file(CmnLibMod,
+                              [{outdir, filename:join(ScriptPath,"..")},
+                               report]) of
+                {ok, common} -> ?L("common compile");
+                error ->
+                    ?L("common compile failed"),
+                    error(common_compile_error)
+            end
+    end,
+
+    put(config, #config{platform="linux"}),
+
+    ?L("loading common library ~p", [CmnLibMod]),
+    case code:load_abs(CmnLibMod) of
+        {error, What} -> error(What);
+        {module, common} -> common:main(ScriptPath)
+    end,
+    
     C = get(config),
     ?L("--------------------------------------------------------------------------------"),
-    ?L("packaging ~p (~s) of version ~s", [C#config.app, C#config.desc, C#config.version]),
+    ?L("packaging ~p", [C#config.app]),
     ?L("--------------------------------------------------------------------------------"),
     ?L("name        : ~s", [C#config.pkgName]),
+    ?L("version     : ~s", [C#config.version]),
+    ?L("description : ~s", [C#config.desc]),
     ?L("company     : ~s", [C#config.pkgCompany]),
     ?L("comment     : ~s", [C#config.pkgComment]),
     ?L("priv dirs   : ~p", [C#config.privFolders]),
     ?L("app root    : ~s", [C#config.topDir]),
     ?L("tmp src     : ~s", [C#config.tmpSrcDir]),
-    ?L("RPM path    : ~s", [C#config.rpmPath]),
+    ?L("RPM path    : ~s", [C#config.buildPath]),
     ?L("rebar       : ~s", [C#config.rebar]),
     ?L("--------------------------------------------------------------------------------"),
     build_rpm();
@@ -124,85 +63,13 @@ main([]) ->
     put(skip_build, false),
     main(main).
 
-app_info_from_app_src(AppSrcData) ->
-    case lists:keyfind(application, 1, AppSrcData) of
-        false -> exit({"malformed", AppSrcData});
-        {application, AppName, AppConfig} ->
-            Desc = case proplists:get_value(description, AppConfig) of
-                       undefined -> "";
-                       D -> D
-                   end,
-            Version = case proplists:get_value(vsn, AppConfig) of
-                       undefined -> exit("version not defined");
-                       V -> V
-                   end,
-            {AppName, Desc, Version}
-    end.
-
-copy_first_time(File) ->
-    C = get(config),
-    case filelib:is_file(?FNJ([C#config.topDir,"rel","files",File])) of
-        true ->
-            ?L("override for ~s found in rel/files", [File]);
-        false ->
-            Src = ?FNJ([C#config.topDir,"deps","erlpkg","windows",File]),
-            Dst = ?FNJ([C#config.topDir,"rel","files",File]),
-            ?L("checking ~s", [Dst]),
-            case filelib:ensure_dir(Dst) of
-                ok -> ok;
-                {error, Error1} ->
-                    exit({"failed to create path for "++Dst, Error1})
-            end,
-            case file:copy(Src, Dst) of
-                {error, Error} ->
-                    exit({"failed to copy "++File, Error});
-                {ok, _BytesCopied} ->
-                   ?L("copied ~s to rel/files", [File])
-            end
-    end.
-
-get_app_src(SDir) ->
-    case filelib:wildcard("*.app.src", SDir) of
-        [AppSrcFile] ->
-            case catch file:consult(?FNJ([SDir, AppSrcFile])) of
-                {'EXIT', Error} -> exit({"bad file", AppSrcFile, Error});
-                {ok, AppSrcFileData} -> AppSrcFileData
-            end;
-        Else -> exit({"unable to proceed with following app.src info", Else})
-    end.
-
-get_app_src_from_rebar_conf(RootPath) ->
-    case catch file:consult(?FNJ([RootPath, "rebar.config"])) of
-        {'EXIT', Error} ->
-            exit({"rebar.config not found", Error});
-        {ok, RebarConf} ->
-            case proplists:get_value(sub_dirs, RebarConf) of
-                undefined ->
-                    exit("sub_dirs not defined in rebar.config");
-                SubDirs ->
-                    case lists:foldl(
-                           fun(Dir, undefined) ->
-                                   case catch get_app_src(
-                                                ?FNJ([RootPath,Dir,"src"])) of
-                                       {'EXIT', _} -> undefined;
-                                       AppSrc -> AppSrc
-                                   end;
-                              (_Dir, AppSrc) -> AppSrc
-                           end, undefined, SubDirs) of
-                        undefined ->
-                            exit({"src dir not found", SubDirs});
-                        AppSrcFileData -> AppSrcFileData
-                    end
-            end
-    end.
-
 build_rpm() ->
     C = get(config),
     % Build a source tarball
     case get(skip_build) of
         false ->
             [begin
-                 Dir = filename:join(C#config.rpmPath, D),
+                 Dir = filename:join(C#config.buildPath, D),
                  ?OSCMD("rm -rf "++Dir),
                  ok = file:make_dir(Dir)
              end || D <- ["BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS"]],
@@ -216,11 +83,10 @@ build_rpm() ->
     make_spec(),
 
     ?L("Building rpm, this may take a while..."),
-    SpecsFolder = filename:join(C#config.rpmPath, "SPECS"),
+    SpecsFolder = filename:join(C#config.buildPath, "SPECS"),
     ok = file:set_cwd(SpecsFolder),
     RpmBuildCmd = ?OSCMD("which rpmbuild"),
-    run_port(RpmBuildCmd, ["-ba", "dderl.spec"], SpecsFolder),
-    ok = file:set_cwd(CurDir).
+    run_port(RpmBuildCmd, ["-ba", "dderl.spec"], SpecsFolder).
 
 run_port(Cmd, Args) ->
     log_cmd(Cmd,
@@ -255,7 +121,7 @@ log_cmd(Cmd, Port) when is_port(Port) ->
 build_sources() ->
     C = get(config),
     ProjDir = C#config.topDir,
-    RpmSources = filename:join(C#config.rpmPath, "SOURCES"),
+    RpmSources = filename:join(C#config.buildPath, "SOURCES"),
     Version = C#config.version,
     RootDir = filename:join(RpmSources, C#config.app++"-"++Version),
     ?OSCMD("rm -rf "++RootDir),
@@ -312,20 +178,20 @@ copy_deep(ProjDep, TargetDep) ->
      end
      || D <- filelib:wildcard("*", ProjDep)].
 
-make_spec(Version, Description) ->
+make_spec() ->
+    C = get(config),
     ProjDir = C#config.topDir,
-    SpecsFolder = filename:join(C#config.rpmPath, "SPECS"),
-    SpecFile = filename:join(SpecPath, "dderl.spec"),
+    SpecsFolder = filename:join(C#config.buildPath, "SPECS"),
+    SpecFile = filename:join(SpecsFolder, C#config.app++".spec"),
     Version = C#config.version,
     ?L("Writing Specs to ~s", [SpecFile]),
 
-    % Description
     {ok, FileH} = file:open(SpecFile, [write, raw]),
     ok = file:write(FileH,
         "Name:           dderl\n"
         "Version:        "++Version++"\n"
         "Release:        1%{?dist}\n"
-        "Summary:        "++Description++"\n"
+        "Summary:        "++C#config.desc++"\n"
         "\n"
         "Group:          Applications/Communications\n"
         "Vendor:         K2 Informatics, GmbH\n"
