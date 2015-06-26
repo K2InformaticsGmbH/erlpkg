@@ -122,7 +122,7 @@ build_sources() ->
     ok = file:make_dir(Deps),
     copy_deep(filename:join([ProjDir, "deps"]), Deps),
     ?OSCMD("tar cvf "++filename:join(RpmSources, C#config.app++"-"++Version++".tar.gz")
-            ++" "++filename:join(RpmSources, C#config.app++"-"++Version)),
+            ++" -C "++RpmSources++" ."),
     ?OSCMD("rm -rf "++RootDir).
 
 copy_folder(Src, Target, Folder, Match) ->
