@@ -86,19 +86,21 @@ build_rpm() ->
     SpecsFolder = filename:join(C#config.buildPath, "SPECS"),
     ok = file:set_cwd(SpecsFolder),
     RpmBuildCmd = ?OSCMD("which rpmbuild"),
-    run_port(RpmBuildCmd, ["-ba", "dderl.spec"], SpecsFolder).
+    run_port(RpmBuildCmd, ["-vv", "-ba", C#config.app++".spec"], SpecsFolder).
 
 run_port(Cmd, Args) ->
     log_cmd(Cmd,
-            erlang:open_port({spawn_executable, Cmd},
-                             [{line, 128},{args, Args}, exit_status,
-                              stderr_to_stdout, {parallelism, true}])).
+            erlang:open_port(
+              {spawn_executable,Cmd},
+              [{line, 128},{args, Args}, exit_status,
+               stderr_to_stdout, {parallelism, true}])).
 run_port(Cmd, Args, Cwd) ->
-    log_cmd(Cmd
-           , erlang:open_port({spawn_executable, Cmd}
-                             ,[{cd, Cwd},{line, 128},{args, Args}
-                              ,exit_status,stderr_to_stdout
-                              ,{parallelism, true}])).
+    ?L("run_port(~p, ~p, ~p)", [Cmd, Args, Cwd]),
+    log_cmd(Cmd,
+            erlang:open_port(
+              {spawn_executable,Cmd},
+              [{cd,Cwd},{line,128},{args,Args},exit_status,stderr_to_stdout,
+               {parallelism,true}])).
 
 -define(NL(__Fmt,__Args), io:format(__Fmt, __Args)).
 -define(NL(__Fmt), ?NL(__Fmt,[])).
@@ -127,9 +129,15 @@ build_sources() ->
     ?OSCMD("rm -rf "++RootDir),
     ok = file:make_dir(RootDir),
     [begin
-        {ok, _} = file:copy(filename:join(ProjDir,F),
-                        filename:join(RootDir,F))
-    end || F <- ["rebar.config", "LICENSE", "README.md", "RELEASE-DDERL.md"]],
+         Src = filename:join(ProjDir,F),
+         Dst = filename:join(RootDir,F),
+         case file:copy(Src,Dst) of
+             {ok, _} -> ok;
+             Error ->
+                 ?L("Error copying ~s to ~s", [Src,Dst]),
+                 error(Error)
+         end
+    end || F <- ["rebar.config", "LICENSE", "README.md", "RELEASE-MPRO.md"]],
     ?OSCMD("cp -L `which rebar` "++RootDir),
     copy_folder(ProjDir, RootDir, ["include"], "*.*"),
     copy_folder(ProjDir, RootDir, ["src"], "*.*"),
@@ -146,7 +154,7 @@ build_sources() ->
     ok = file:make_dir(Deps),
     copy_deep(filename:join([ProjDir, "deps"]), Deps),
     ?OSCMD("tar cvf "++filename:join(RpmSources, C#config.app++"-"++Version++".tar.gz")
-            ++" -C "++RpmSources++C#config.app++"-"++Version),
+            ++" "++filename:join(RpmSources, C#config.app++"-"++Version)),
     ?OSCMD("rm -rf "++RootDir).
 
 copy_folder(Src, Target, Folder, Match) ->
@@ -184,11 +192,12 @@ make_spec() ->
     SpecsFolder = filename:join(C#config.buildPath, "SPECS"),
     SpecFile = filename:join(SpecsFolder, C#config.app++".spec"),
     Version = C#config.version,
+    App = C#config.app,
     ?L("Writing Specs to ~s", [SpecFile]),
 
     {ok, FileH} = file:open(SpecFile, [write, raw]),
     ok = file:write(FileH,
-        "Name:           dderl\n"
+        "Name:           "++App++"\n"
         "Version:        "++Version++"\n"
         "Release:        1%{?dist}\n"
         "Summary:        "++C#config.desc++"\n"
@@ -201,7 +210,7 @@ make_spec() ->
         "\n"
         "BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-"
                                                       "%(%{__id_u} -n)\n"
-        "Source:         dderl-"++Version++".tar.gz\n"),
+        "Source:         "++App++"-"++Version++".tar.gz\n"),
 
     % Description
     ok = file:write(FileH,
@@ -211,22 +220,22 @@ make_spec() ->
     ErlVer = erlang:system_info(version),
     ok = file:write(FileH,
         "\n"
-        "%define _topdir "++filename:dirname(filename:absname(escript:script_name()))++"\n"
-        "%define _localstatedir /var/opt/dderl\n"
-        "%define _bindir /opt/dderl/bin\n"
-        "%define _sbindir /opt/dderl/bin\n"
+        "%define _topdir "++filename:absname(C#config.buildPath)++"\n"
+        "%define _localstatedir /var/opt/"++App++"\n"
+        "%define _bindir /opt/"++App++"/bin\n"
+        "%define _sbindir /opt/"++App++"/bin\n"
         "%define _sysconfdir /etc\n"
-        "%define _installdir /opt/dderl\n"
-        "%define _reldir /opt/dderl/releases\n"
-        "%define _erts /opt/dderl/erts-"++ErlVer++"\n"
-        "%define _libdir /opt/dderl/lib\n"
-        "%define _etcdir /opt/dderl/etc\n"
-        "%define _config /opt/dderl/config\n"
-        "%define _run /var/run/dderl\n"
-        "%define _pipe /tmp/opt/dderl\n"
+        "%define _installdir /opt/"++App++"\n"
+        "%define _reldir /opt/"++App++"/releases\n"
+        "%define _erts /opt/"++App++"/erts-"++ErlVer++"\n"
+        "%define _libdir /opt/"++App++"/lib\n"
+        "%define _etcdir /opt/"++App++"/etc\n"
+        "%define _config /opt/"++App++"/config\n"
+        "%define _run /var/run/"++App++"\n"
+        "%define _pipe /tmp/opt/"++App++"\n"
         "%define _smp_mflags  -j3\n"
         "%define __arch_install_post   /usr/lib/rpm/check-rpaths   /usr/lib/rpm/check-buildroot\n"
-        "%define init_script %{_sysconfdir}/init.d/dderl\n"
+        "%define init_script %{_sysconfdir}/init.d/"++App++"\n"
         "%define debug_package %{nil}\n"
         "%global __prelink_undo_cmd %{nil}\n"),
 
@@ -234,7 +243,7 @@ make_spec() ->
     ok = file:write(FileH,
         "\n"
         "%prep\n"
-        "%setup -q -n dderl-"++Version++"\n"),
+        "%setup -q -n "++App++"-"++Version++"\n"),
 
     % Build
     ok = file:write(FileH,
@@ -247,7 +256,7 @@ make_spec() ->
     ok = file:write(FileH,
         "\n"
         "%install\n"
-        "%define relpath       %{_builddir}/%{buildsubdir}/rel/dderl\n"
+        "%define relpath       %{_builddir}/%{buildsubdir}/rel/"++App++"\n"
         "%define buildroot_etc %{buildroot}%{_etcdir}\n"
         "\n"
         "mkdir -p %{buildroot_etc}\n"
@@ -257,7 +266,7 @@ make_spec() ->
         "mkdir -p %{buildroot}%{_config}\n"
         "mkdir -p %{buildroot}%{_run}\n"
         "mkdir -p %{buildroot}%{_pipe}\n"
-        "mkdir -p %{buildroot}%{_localstatedir}/log/dderl\n"
+        "mkdir -p %{buildroot}%{_localstatedir}/log/"++App++"\n"
         "\n"
         "cp -R %{relpath}/etc       %{buildroot}%{_installdir}\n"
         "cp -R %{relpath}/lib       %{buildroot}%{_installdir}\n"
@@ -274,10 +283,10 @@ make_spec() ->
         "if [ -d %{_builddir}/%{buildsubdir}/doc/man/man1 ]; then \\\n"
         "   echo -n; fi\n"
         "\n"
-        "mkdir -p %{buildroot}%{_localstatedir}/log/dderl\n"
+        "mkdir -p %{buildroot}%{_localstatedir}/log/"++App++"\n"
         "mkdir -p %{buildroot}%{_sysconfdir}/init.d\n"
         "install -m755 %{buildroot_etc}/init.script  %{buildroot}%{_sysconfdir}"
-                                                                "/init.d/dderl\n"
+                                                                "/init.d/"++App++"\n"
         "\n"
         "# Needed to work around check-rpaths which seems to be hardcoded into"
         " recent\n"
@@ -294,7 +303,7 @@ make_spec() ->
     ok = file:write(FileH,
         "\n"
         "%files\n"
-        "%defattr(-,dderl,dderl)\n"
+        "%defattr(-,"++App++","++App++")\n"
         "%doc LICENSE\n"
         "%doc README.md\n"
         "%doc RELEASE-DDERL.md\n"
@@ -308,8 +317,8 @@ make_spec() ->
         "%{_config}\n"
         "%{_run}\n"
         "%{_pipe}\n"
-        "%{_localstatedir}/log/dderl\n"
-        "%{_sysconfdir}/init.d/dderl\n"
+        "%{_localstatedir}/log/"++App++"\n"
+        "%{_sysconfdir}/init.d/"++App++"\n"
         %"%{_mandir}/man1\n"
         "\n"),
 
@@ -321,24 +330,24 @@ make_spec() ->
     ok = file:write(FileH,
         "\n"
         "%pre\n"
-        "if ! getent group dderl >/dev/null 2>&1; then\n"
-        "   groupadd -r dderl\n"
+        "if ! getent group "++App++" >/dev/null 2>&1; then\n"
+        "   groupadd -r "++App++"\n"
         "fi\n"
         "\n"
-        "if getent passwd dderl >/dev/null 2>&1; then\n"
-        "   usermod -d %{_localstatedir} dderl\n"
+        "if getent passwd "++App++" >/dev/null 2>&1; then\n"
+        "   usermod -d %{_localstatedir} "++App++"\n"
         "else\n"
-        "   useradd -r -g dderl \\\n"
+        "   useradd -r -g "++App++" \\\n"
         "           --home %{_localstatedir} \\\n"
         "           --comment \"Dderl user\" \\\n"
-        "           dderl\n"
+        "           "++App++"\n"
         "fi\n"),
 
     % Pre Un-Install
     ok = file:write(FileH,
         "\n"
         "%preun\n"
-        "chkconfig --del dderl\n"),
+        "chkconfig --del "++App++"\n"),
 
     % Post Install
     ok = file:write(FileH,
@@ -359,10 +368,10 @@ make_spec() ->
         "\n"
         "# Make sure shell library file is readable\n"
         "chmod 0755 %{_libdir}/env.sh\n"
-        "chown -R dderl:dderl %{_installdir}\n"
-        "chown -R dderl:dderl %{_localstatedir}\n"
-        "chown -R dderl:dderl %{_run}\n"
+        "chown -R "++App++":"++App++" %{_installdir}\n"
+        "chown -R "++App++":"++App++" %{_localstatedir}\n"
+        "chown -R "++App++":"++App++" %{_run}\n"
         "chown -R mpro:mpro %{_pipe}\n"
-        "chkconfig --add dderl\n"),
+        "chkconfig --add "++App++"\n"),
 
     ok = file:close(FileH).
