@@ -2,7 +2,7 @@
 
 -include("common.hrl").
 
--export([main/1,copy_first_time/1]).
+-export([main/1,copy_first_time/1,run_port/2,run_port/3]).
 
 -define(Lg(__Fmt,__Args), ?L("~p : "++__Fmt, [?MODULE|__Args])).
 -define(Lg(__Fmt), ?Lg(__Fmt,[])).
@@ -154,3 +154,33 @@ app_info_from_app_src(AppSrcData) ->
             {AppName, Desc, Version}
     end.
 
+run_port(Cmd, Args) ->
+    log_cmd(Cmd,
+            erlang:open_port(
+              {spawn_executable,Cmd},
+              [{line, 128},{args, Args}, exit_status,
+               stderr_to_stdout, {parallelism, true}])).
+run_port(Cmd, Args, Cwd) ->
+    ?Lg("run_port(~p, ~p, ~p)", [Cmd, Args, Cwd]),
+    log_cmd(Cmd,
+            erlang:open_port(
+              {spawn_executable,Cmd},
+              [{cd,Cwd},{line,128},{args,Args},exit_status,stderr_to_stdout,
+               {parallelism,true}])).
+
+-define(NL(__Fmt,__Args), io:format(__Fmt, __Args)).
+-define(NL(__Fmt), ?NL(__Fmt,[])).
+log_cmd(Cmd, Port) when is_port(Port) ->
+    receive
+        {'EXIT',Port,Reason} -> ?E("~s terminated for ~p", [Cmd, Reason]);
+        {Port,closed} -> ?E("~s terminated", [Cmd]);
+        {Port,{exit_status,Status}} ->
+            ?E("~s exit with status ~p", [Cmd, Status]),
+            catch erlang:port_close(Port);
+        {Port,{data,{F,Line}}} ->
+            ?NL("~s" ++ if F =:= eol -> "~n"; true -> "" end, [Line]),
+            log_cmd(Cmd, Port);
+        {Port,{data,Data}} ->
+            ?NL("~p", [Data]),
+            log_cmd(Cmd, Port)
+    end.

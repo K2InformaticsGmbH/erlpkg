@@ -86,39 +86,7 @@ build_rpm() ->
     SpecsFolder = filename:join(C#config.buildPath, "SPECS"),
     ok = file:set_cwd(SpecsFolder),
     RpmBuildCmd = ?OSCMD("which rpmbuild"),
-    run_port(RpmBuildCmd, ["-vv", "-ba", C#config.app++".spec"], SpecsFolder).
-
-run_port(Cmd, Args) ->
-    log_cmd(Cmd,
-            erlang:open_port(
-              {spawn_executable,Cmd},
-              [{line, 128},{args, Args}, exit_status,
-               stderr_to_stdout, {parallelism, true}])).
-run_port(Cmd, Args, Cwd) ->
-    ?L("run_port(~p, ~p, ~p)", [Cmd, Args, Cwd]),
-    log_cmd(Cmd,
-            erlang:open_port(
-              {spawn_executable,Cmd},
-              [{cd,Cwd},{line,128},{args,Args},exit_status,stderr_to_stdout,
-               {parallelism,true}])).
-
--define(NL(__Fmt,__Args), io:format(__Fmt, __Args)).
--define(NL(__Fmt), ?NL(__Fmt,[])).
-log_cmd(Cmd, Port) when is_port(Port) ->
-    receive
-        {'EXIT',Port,Reason} -> ?L("~s terminated for ~p", [Cmd, Reason]);
-        {Port,closed} -> ?L("~s terminated", [Cmd]);
-        {Port,{exit_status,Status}} ->
-            ?L("~s exit with status ~p", [Cmd, Status]),
-            catch erlang:port_close(Port);
-        {Port,{data,{F,Line}}} ->
-            ?NL("~s" ++ if F =:= eol -> "~n"; true -> "" end
-               , [Line]),
-            log_cmd(Cmd, Port);
-        {Port,{data,Data}} ->
-            ?NL("~p", [Data]),
-            log_cmd(Cmd, Port)
-    end.
+    common:run_port(RpmBuildCmd, ["-vv", "-ba", C#config.app++".spec"], SpecsFolder).
 
 build_sources() ->
     C = get(config),
