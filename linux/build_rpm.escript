@@ -84,9 +84,8 @@ build_rpm() ->
 
     ?L("Building rpm, this may take a while..."),
     SpecsFolder = filename:join(C#config.buildPath, "SPECS"),
-    ok = file:set_cwd(SpecsFolder),
     RpmBuildCmd = ?OSCMD("which rpmbuild"),
-    common:run_port(RpmBuildCmd, ["-vv", "-ba", C#config.app++".spec"], SpecsFolder).
+    common:run_port(RpmBuildCmd, ["-vv", "-ba", filename:join(SpecsFolder, C#config.app++".spec")], SpecsFolder).
 
 build_sources() ->
     C = get(config),
@@ -109,6 +108,8 @@ build_sources() ->
     ?OSCMD("cp -L `which rebar` "++RootDir),
     copy_folder(ProjDir, RootDir, ["include"], "*.*"),
     copy_folder(ProjDir, RootDir, ["src"], "*.*"),
+    copy_folder(ProjDir, RootDir, ["src", "smpp_parser"], "*.*"),
+    copy_folder(ProjDir, RootDir, ["src", "ucp_parser"], "*.*"),
     copy_folder(ProjDir, RootDir, ["docs"], "*.*"),
     copy_folder(ProjDir, RootDir, ["rel"], "*.*"),
     copy_folder(ProjDir, RootDir, ["rel", "files"], "*"),
