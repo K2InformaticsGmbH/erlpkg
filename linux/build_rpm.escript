@@ -181,6 +181,7 @@ make_spec() ->
         "\n"
         "BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-"
                                                       "%(%{__id_u} -n)\n"
+        "AutoReqProv:    no\n"
         "Source:         "++App++"-"++Version++".tar.gz\n"),
 
     % Description
