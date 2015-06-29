@@ -283,35 +283,6 @@ uuid() ->
     string:to_upper(re:replace(os:cmd("uuidgen.exe"), "\r\n", "",
                                [{return, list}])).
 
-run_port(Cmd, Args) ->
-    log_cmd(Cmd,
-            erlang:open_port({spawn_executable, Cmd},
-                             [{line, 128},{args, Args}, exit_status,
-                              stderr_to_stdout, {parallelism, true}])).
-run_port(Cmd, Args, Cwd) ->
-    log_cmd(Cmd,
-            erlang:open_port({spawn_executable, Cmd},
-                             [{cd, Cwd},{line, 128},{args, Args},
-                              exit_status,stderr_to_stdout,
-                              {parallelism, true}])).
-
--define(NL(__Fmt,__Args), io:format(__Fmt, __Args)).
--define(NL(__Fmt), ?NL(__Fmt,[])).
-log_cmd(Cmd, Port) when is_port(Port) ->
-    receive
-        {'EXIT',Port,Reason} -> ?E("~s terminated for ~p", [Cmd, Reason]);
-        {Port,closed} -> ?E("~s terminated", [Cmd]);
-        {Port,{exit_status,Status}} ->
-            ?E("~s exit with status ~p", [Cmd, Status]),
-            catch erlang:port_close(Port);
-        {Port,{data,{F,Line}}} ->
-            ?NL("~s" ++ if F =:= eol -> "~n"; true -> "" end, [Line]),
-            log_cmd(Cmd, Port);
-        {Port,{data,Data}} ->
-            ?NL("~p", [Data]),
-            log_cmd(Cmd, Port)
-    end.
-
 build_sources() ->
     C = get(config),
     ?L("Source ~s", [C#config.topDir]),
@@ -397,9 +368,9 @@ rebar_generate() ->
     ok = file:set_cwd(C#config.tmpSrcDir),
     ?L("Clean Compile and generate..."),
     Verbose = get(verbose), 
-    run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["clean"], C#config.tmpSrcDir),
-    run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["compile"], C#config.tmpSrcDir),
-    run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["generate", "skip_deps=true"], C#config.tmpSrcDir),
+    common:run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["clean"], C#config.tmpSrcDir),
+    common:run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["compile"], C#config.tmpSrcDir),
+    common:run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["generate", "skip_deps=true"], C#config.tmpSrcDir),
     ?L("Leaving ~s to ~s", [C#config.tmpSrcDir, CurDir]),
     ok = file:set_cwd(CurDir).
 
@@ -819,12 +790,12 @@ candle_light() ->
     ok = file:set_cwd(C#config.msiPath),
     Wxses = filelib:wildcard("*.wxs"),
     ?L("candle with ~p", [Wxses]),
-    run_port(C#config.candle, if Verbose -> ["-v"]; true -> [] end
+    common:run_port(C#config.candle, if Verbose -> ["-v"]; true -> [] end
              ++ ["-ext", "WixUtilExtension" | Wxses]),
     WixObjs = filelib:wildcard("*.wixobj"),
     MsiFile = generate_msi_name(),
     ?L("light ~s with ~p", [MsiFile, WixObjs]),
-    run_port(C#config.light, if Verbose -> ["-v"]; true -> [] end
+    common:run_port(C#config.light, if Verbose -> ["-v"]; true -> [] end
              ++ ["-ext", "WixUtilExtension",
                  "-ext", "WixUIExtension",
                  "-out", MsiFile | WixObjs]),
