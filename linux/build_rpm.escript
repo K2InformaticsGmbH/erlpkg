@@ -83,9 +83,11 @@ build_rpm() ->
     make_spec(),
 
     ?L("Building rpm, this may take a while..."),
-    SpecsFolder = filename:join(C#config.buildPath, "SPECS"),
-    RpmBuildCmd = ?OSCMD("which rpmbuild"),
-    common:run_port(RpmBuildCmd, ["-vv", "-ba", filename:join(SpecsFolder, C#config.app++".spec")], SpecsFolder).
+    common:run_port(?OSCMD("which rpmbuild"),
+                    ["-vv", "-ba",
+                     filename:join(
+                       filename:join(C#config.buildPath, "SPECS"),
+                       C#config.app++".spec")]).
 
 build_sources() ->
     C = get(config),
@@ -275,7 +277,7 @@ make_spec() ->
         "%defattr(-,"++App++","++App++")\n"
         "%doc LICENSE\n"
         "%doc README.md\n"
-        "%doc RELEASE-DDERL.md\n"
+        "%doc RELEASE-"++string:to_upper(App)++".md\n"
         "%{_bindir}\n"
         "%{_erts}/*\n"
         "%{_etcdir}/*\n"
