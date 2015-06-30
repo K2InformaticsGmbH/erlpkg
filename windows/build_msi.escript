@@ -2,67 +2,37 @@
 %% -*- erlang -*-
 %%! -smp enable -mnesia debug verbose
 -include_lib("kernel/include/file.hrl").
-
--define(H(__F), integer_to_list(erlang:phash2(__F), 16)).
-
--define(TRACE,  io:format("TRACE ~p~n", [?LINE])).
-
--record(item, { id
-              , type % file | dir | component
-              , guid
-              , name
-              , path
-              , file_info
-        }).
-
--define(E(__Fmt,__Args), io:format("[~p] "++__Fmt++"~n", [?LINE | __Args])).
--define(E(__Fmt), ?E(__Fmt,[])).
-
--define(L(__Fmt,__Args),
-        (fun() ->
-                 case get(verbose) of
-                     V when V == true; V == undefined ->
-                         io:format("[~p] "++__Fmt++"~n", [?LINE | __Args]),
-                         if V == undefined -> put(verbose, true);
-                            true -> ok end;
-                     false -> ok
-                 end
-         end)()).
--define(L(__Fmt), ?L(__Fmt,[])).
-
--define(OSCMD(__Cmd),
-    (fun() ->
-        CR = os:cmd(__Cmd),
-        CmdResp = re:replace(CR, "[\r\n ]*$", "", [{return, list}]),
-        ?L(__Cmd++": ~s", [CmdResp]),
-        CmdResp
-    end)()
-).
-
--define(FNJ(__Parts), filename:join(__Parts)).
-
--record(config, {app, desc, version, tmpSrcDir, topDir, rebar, candle, light,
-                 msiPath, pkgName, pkgCompany, pkgComment, privFolders, upgradeCode}).
+-include("../common.hrl").
 
 main(main) ->
-    io:format(user, "[~p] build_msi with verbose ~p~n", [?LINE, get(verbose)]),
-    ScriptPath = filename:absname(escript:script_name()),
-    RootPath = case lists:reverse(filename:split(ScriptPath)) of
-                   ["build_msi.escript", "windows", "erlpkg", "deps"
-                    | RootPathPartsRev] ->
-                       filename:join(lists:reverse(RootPathPartsRev));
-                   _ ->
-                       exit({"owner project path not found",
-                              ScriptPath})
-               end,
-    Rebar = case os:find_executable("rebar") of
-        false ->
-            case os:find_executable("rebar", RootPath) of
-                false -> exit("rebar not found");
-                R-> R
-            end;
-        R -> R
+    ScriptPath = filename:dirname(escript:script_name()),
+    CmnLibMod = filename:join([ScriptPath, "..", "common"]),
+    case {file:read_file_info(CmnLibMod++".erl"),
+          file:read_file_info(CmnLibMod++".beam")} of
+        {{ok, #file_info{mtime = M1}},
+         {ok, #file_info{mtime = M2}}} when M1 =< M2 -> ok;
+
+        _ ->
+            case compile:file(CmnLibMod,
+                              [{outdir, filename:join(ScriptPath,"..")},
+                               report]) of
+                {ok, common} -> ?L("common compile");
+                error ->
+                    ?L("common compile failed"),
+                    error(common_compile_error)
+            end
     end,
+
+    put(config, #config{platform="windows"}),
+
+    ?L("loading common library ~p", [CmnLibMod]),
+    case code:load_abs(CmnLibMod) of
+        {error, What} -> error(What);
+        {module, common} -> common:main(ScriptPath)
+    end,
+    
+    C0 = get(config),
+
     Candle = case os:find_executable("candle.exe") of
                  false -> exit("candle.exe not found, wix not installed?");
                  Cndl -> Cndl
@@ -71,76 +41,37 @@ main(main) ->
                  false -> exit("light.exe not found, wix not installed?");
                  L -> L
              end,
-    SDir = ?FNJ([RootPath, "src"]),
-    AppSrcData = case filelib:is_dir(SDir) of
-                 false -> get_app_src_from_rebar_conf(RootPath);
-                 true -> get_app_src(SDir)
-             end,
-    {App, Desc, Version} = app_info_from_app_src(AppSrcData),
-    ReleaseTopDir = ?FNJ([RootPath, "rel", "erlpkg_release"]),
-    case filelib:is_dir(ReleaseTopDir) of
-        false ->
-            ok = file:make_dir(ReleaseTopDir),
-            ?L("Created ~s", [ReleaseTopDir]);
-        _ -> ok
-    end,
-    MsiPath = ?FNJ([ReleaseTopDir,"msi"]),
-    case filelib:is_dir(MsiPath) of
-        false ->
-            ok = file:make_dir(MsiPath),
-            ?L("Created ~s", [MsiPath]);
-        _ -> ok
-    end,
-    AppStr = atom_to_list(App),
-    Conf = #config{app = AppStr, desc = Desc, rebar = Rebar, light = Light,
-                   topDir = RootPath, version = Version, candle = Candle,
-                   tmpSrcDir = ?FNJ([ReleaseTopDir, AppStr++"-"++Version]),
-                   msiPath = MsiPath},
-    put(config, Conf),
+
+    put(config, C0#config{light = Light, candle = Candle}),
 
     % Copying application specific files
     [begin
-         copy_first_time(F),
+         common:copy_first_time(F),
          copy_to_msi(F)
      end || F <- ["ServiceSetupDlg.wxs", "banner493x58.jpg",
                   "dialog493x312.jpg", "application.ico", "License.rtf"]],
-    copy_first_time("erlpkg.conf"),
-    {ok, Config} = file:consult(?FNJ([RootPath,"rel","files","erlpkg.conf"])),
-    PkgName = case proplists:get_value(name, Config, '$not_found') of
-                  '$not_found' -> "Application Name";
-                  PName -> PName
-              end,
-    PkgCompany = case proplists:get_value(company, Config, '$not_found') of
-                  '$not_found' -> "Name of the Company";
-                  Comp -> Comp
-              end,
-    PkgComment = case proplists:get_value(comment, Config, '$not_found') of
-                  '$not_found' -> PkgName++" is a registered trademark of "++PkgCompany;
-                  PCmnt -> PCmnt
-              end,
-    PrivFolders = case proplists:get_value(privfolders, Config, '$not_found') of
-                  '$not_found' -> "*";
-                  PrivDirs -> PrivDirs
-              end,
+    {ok, Config} = file:consult(?FNJ([C0#config.topDir,"rel","files","erlpkg.conf"])),
     UpgradeCode = case proplists:get_value(upgradecode, Config, '$not_found') of
                   '$not_found' -> '$no_upgrade_code_defined';
                   UpCode -> UpCode
               end,
-    put(config, Conf#config{pkgName = PkgName, pkgCompany = PkgCompany,
-                            pkgComment = PkgComment, privFolders = PrivFolders,
-                            upgradeCode = UpgradeCode}),
+    C1 = get(config),
+    put(config, C1#config{upgradeCode = UpgradeCode}),
+
     C = get(config),
     ?L("--------------------------------------------------------------------------------"),
-    ?L("packaging ~p (~s) of version ~s", [C#config.app, C#config.desc, C#config.version]),
+    ?L("packaging ~p", [C#config.app]),
     ?L("--------------------------------------------------------------------------------"),
     ?L("name        : ~s", [C#config.pkgName]),
+    ?L("version     : ~s", [C#config.version]),
+    ?L("description : ~s", [C#config.desc]),
     ?L("company     : ~s", [C#config.pkgCompany]),
     ?L("comment     : ~s", [C#config.pkgComment]),
     ?L("priv dirs   : ~p", [C#config.privFolders]),
     ?L("upgrade     : ~p", [C#config.upgradeCode]),
     ?L("app root    : ~s", [C#config.topDir]),
     ?L("tmp src     : ~s", [C#config.tmpSrcDir]),
-    ?L("MSI path    : ~s", [C#config.msiPath]),
+    ?L("MSI path    : ~s", [C#config.buildPath]),
     ?L("rebar       : ~s", [C#config.rebar]),
     ?L("candle.exe  : ~s", [C#config.candle]),
     ?L("light.exe   : ~s", [C#config.light]),
@@ -166,86 +97,14 @@ main([]) ->
     put(skip_generate, false),
     main(main).
 
-copy_first_time(File) ->
-    C = get(config),
-    case filelib:is_file(?FNJ([C#config.topDir,"rel","files",File])) of
-        true ->
-            ?L("override for ~s found in rel/files", [File]);
-        false ->
-            Src = ?FNJ([C#config.topDir,"deps","erlpkg","windows",File]),
-            Dst = ?FNJ([C#config.topDir,"rel","files",File]),
-            ?L("checking ~s", [Dst]),
-            case filelib:ensure_dir(Dst) of
-                ok -> ok;
-                {error, Error1} ->
-                    exit({"failed to create path for "++Dst, Error1})
-            end,
-            case file:copy(Src, Dst) of
-                {error, Error} ->
-                    exit({"failed to copy "++File, Error});
-                {ok, _BytesCopied} ->
-                   ?L("copied ~s to rel/files", [File])
-            end
-    end.
-
 copy_to_msi(File) ->
     C = get(config),
     case file:copy(?FNJ([C#config.topDir,"rel","files",File]),
-                   ?FNJ([C#config.msiPath,File])) of
+                   ?FNJ([C#config.buildPath,File])) of
         {error, Error} ->
             exit({"failed to copy "++File, Error});
         {ok, _BytesCopied} ->
-            ?L("copied ~s to ~s", [File, C#config.msiPath])
-    end.
-
-get_app_src(SDir) ->
-    case filelib:wildcard("*.app.src", SDir) of
-        [AppSrcFile] ->
-            case catch file:consult(?FNJ([SDir, AppSrcFile])) of
-                {'EXIT', Error} -> exit({"bad file", AppSrcFile, Error});
-                {ok, AppSrcFileData} -> AppSrcFileData
-            end;
-        Else -> exit({"unable to proceed with following app.src info", Else})
-    end.
-
-get_app_src_from_rebar_conf(RootPath) ->
-    case catch file:consult(?FNJ([RootPath, "rebar.config"])) of
-        {'EXIT', Error} ->
-            exit({"rebar.config not found", Error});
-        {ok, RebarConf} ->
-            case proplists:get_value(sub_dirs, RebarConf) of
-                undefined ->
-                    exit("sub_dirs not defined in rebar.config");
-                SubDirs ->
-                    case lists:foldl(
-                           fun(Dir, undefined) ->
-                                   case catch get_app_src(
-                                                ?FNJ([RootPath,Dir,"src"])) of
-                                       {'EXIT', _} -> undefined;
-                                       AppSrc -> AppSrc
-                                   end;
-                              (_Dir, AppSrc) -> AppSrc
-                           end, undefined, SubDirs) of
-                        undefined ->
-                            exit({"src dir not found", SubDirs});
-                        AppSrcFileData -> AppSrcFileData
-                    end
-            end
-    end.
-
-app_info_from_app_src(AppSrcData) ->
-    case lists:keyfind(application, 1, AppSrcData) of
-        false -> exit({"malformed", AppSrcData});
-        {application, AppName, AppConfig} ->
-            Desc = case proplists:get_value(description, AppConfig) of
-                       undefined -> "";
-                       D -> D
-                   end,
-            Version = case proplists:get_value(vsn, AppConfig) of
-                       undefined -> exit("version not defined");
-                       V -> V
-                   end,
-            {AppName, Desc, Version}
+            ?L("copied ~s to ~s", [File, C#config.buildPath])
     end.
 
 build_msi() ->
@@ -363,25 +222,20 @@ copy_deep(PathPrefixLen, ProjDep, TargetDep) ->
 rebar_generate() ->
     C = get(config),
     file:delete(C#config.app++"ids.dets"),
-    {ok, CurDir} = file:get_cwd(),
-    ?L("Entering ~s from ~s", [C#config.tmpSrcDir, CurDir]),
-    ok = file:set_cwd(C#config.tmpSrcDir),
     ?L("Clean Compile and generate..."),
     Verbose = get(verbose), 
-    common:run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["clean"], C#config.tmpSrcDir),
-    common:run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["compile"], C#config.tmpSrcDir),
-    common:run_port("rebar.bat", if Verbose -> ["-v"]; true -> [] end ++ ["generate", "skip_deps=true"], C#config.tmpSrcDir),
-    ?L("Leaving ~s to ~s", [C#config.tmpSrcDir, CurDir]),
-    ok = file:set_cwd(CurDir).
+    Rebar = filename:join(C#config.tmpSrcDir,"rebar.bat"),
+    common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["clean"], C#config.tmpSrcDir),
+    common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["compile"], C#config.tmpSrcDir),
+    common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["generate", "skip_deps=true"], C#config.tmpSrcDir).
 
 create_wxs() ->
     C = get(config),
     Proj = C#config.app,
     Version = C#config.version,
-    Root = C#config.tmpSrcDir,
     Tab = Proj++"ids",
     {ok, FileH} = file:open(
-                    filename:join([C#config.msiPath,
+                    filename:join([C#config.buildPath,
                                    lists:flatten([Proj,"-",Version,".wxs"])]),
                     [write, raw]),
     {ok, PRODUCT_GUID} = get_id(Tab, undefined, 'PRODUCT_GUID', undefined),
@@ -453,7 +307,7 @@ create_wxs() ->
         "       <Directory Id='"++ID++"' Name='"++C#config.pkgCompany++"'>\n"
         "         <Directory Id='INSTALLDIR' Name='"++C#config.pkgName++"'>\n"),
 
-    walk_release(Proj, Tab, FileH, Root),
+    walk_release(Proj, Tab, FileH, filename:absname(C#config.tmpSrcDir)),
     ?L("finished walking OTP release"),
     
     ok = file:write(FileH,
@@ -787,7 +641,7 @@ candle_light() ->
     Verbose = get(verbose),
     C = get(config),
     {ok, CurDir} = file:get_cwd(),
-    ok = file:set_cwd(C#config.msiPath),
+    ok = file:set_cwd(C#config.buildPath),
     Wxses = filelib:wildcard("*.wxs"),
     ?L("candle with ~p", [Wxses]),
     common:run_port(C#config.candle, if Verbose -> ["-v"]; true -> [] end

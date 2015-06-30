@@ -12,9 +12,10 @@ main(ScriptPath) when is_list(ScriptPath) ->
               [?LINE, ?MODULE, escript:script_name(), get(verbose)]),
     try
         C0 = get(config),
+        Platform = C0#config.platform,
         
         RootPath = case lists:reverse(filename:split(ScriptPath)) of
-                       ["linux", "erlpkg", "deps"
+                       [Platform, "erlpkg", "deps"
                         | RootPathPartsRev] ->
                            filename:join(lists:reverse(RootPathPartsRev));
                        _ ->
