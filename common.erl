@@ -13,8 +13,8 @@ main(ScriptPath) when is_list(ScriptPath) ->
     try
         C0 = get(config),
         Platform = C0#config.platform,
-        
-        RootPath = case lists:reverse(filename:split(ScriptPath)) of
+
+        RootPath = case lists:reverse(filename:split(filename:absname(ScriptPath))) of
                        [Platform, "erlpkg", "deps"
                         | RootPathPartsRev] ->
                            filename:join(lists:reverse(RootPathPartsRev));
@@ -87,11 +87,11 @@ copy_first_time(File) ->
     C = get(config),
     case filelib:is_file(?FNJ([C#config.topDir,"rel","files",File])) of
         true ->
-            ?L("override for ~s found in rel/files", [File]);
+            ?Lg("override for ~s found in rel/files", [File]);
         false ->
             Src = ?FNJ([C#config.topDir,"deps","erlpkg",C#config.platform,File]),
             Dst = ?FNJ([C#config.topDir,"rel","files",File]),
-            ?L("checking ~s", [Dst]),
+            ?Lg("checking ~s", [Dst]),
             case filelib:ensure_dir(Dst) of
                 ok -> ok;
                 {error, Error1} ->
@@ -101,7 +101,7 @@ copy_first_time(File) ->
                 {error, Error} ->
                     exit({"failed to copy "++File, Error});
                 {ok, _BytesCopied} ->
-                   ?L("copied ~s to rel/files", [File])
+                   ?Lg("copied ~s to rel/files", [File])
             end
     end.
 
