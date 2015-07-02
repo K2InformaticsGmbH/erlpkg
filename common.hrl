@@ -1,7 +1,7 @@
 -ifndef(_COMMON_H_).
 -define(_COMMON_H_, true).
 
--define(H(__F), integer_to_list(erlang:phash2(__F), 16)).
+-define(H(__F), integer_to_list(erlang:phash2(__F,16#100000000),32)).
 
 -define(TRACE,  io:format("TRACE ~p~n", [?LINE])).
 
