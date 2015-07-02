@@ -2,7 +2,7 @@
 
 -include("common.hrl").
 
--export([main/1,copy_first_time/1,run_port/2,run_port/3]).
+-export([main/1,copy_first_time/1,run_port/2,run_port/3,patch_code_gen/0]).
 
 -define(Lg(__Fmt,__Args), ?L("~p : "++__Fmt, [?MODULE|__Args])).
 -define(Lg(__Fmt), ?Lg(__Fmt,[])).
@@ -185,3 +185,20 @@ log_cmd(Cmd, Port) when is_port(Port) ->
             ?NL("~p", [Data]),
             log_cmd(Cmd, Port)
     end.
+
+patch_code_gen() ->
+    C = get(config),
+    BeamPath = filename:join(C#config.topDir, "ebin"),
+    [{{{_,Month,Day},{Hour,_,_}},_}|_]
+    = lists:reverse(
+        lists:usort(
+          [{filelib:last_modified(filename:join(BeamPath, B)),
+            B} || B <- filelib:wildcard("*.beam", BeamPath)]
+         )),
+    put(config,
+        C#config{
+          patchCode = lists:flatten(
+                        io_lib:format(
+                          "~2..0B~2..0B~2..0B",
+                          [Month,Day,Hour])
+                       )}).

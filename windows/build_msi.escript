@@ -121,8 +121,10 @@ build_msi() ->
             rebar_generate(),
             ?L("OTP release prepared");
         _ ->
+            common:patch_code_gen(),
             ?L("skipped rebar generate")
     end,
+    ?L("patchCode : ~s", [(get(config))#config.patchCode]),
     case file:copy(?FNJ([C#config.topDir,"deps","erlpkg","windows",
                          "service.escript"]),
                    ?FNJ([C#config.tmpSrcDir,"rel",C#config.app,"bin",
@@ -227,6 +229,7 @@ rebar_generate() ->
     Rebar = filename:join(C#config.tmpSrcDir,"rebar.bat"),
     common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["clean"], C#config.tmpSrcDir),
     common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["compile"], C#config.tmpSrcDir),
+    common:patch_code_gen(),
     common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["generate", "skip_deps=true"], C#config.tmpSrcDir).
 
 create_wxs() ->
@@ -670,7 +673,9 @@ generate_msi_name() ->
     {{Y,M,D},{H,Mn,S}} = calendar:local_time(),
     MsiDate = io_lib:format("~4..0B~2..0B~2..0B_~2..0B~2..0B~2..0B",
                             [Y,M,D,H,Mn,S]),
-    lists:flatten([C#config.app,"-",C#config.version,"_",MsiDate,".msi"]).
+    lists:flatten([C#config.app,"-",
+                   C#config.version,".",C#config.patchCode,"_",
+                   MsiDate,".msi"]).
 
 walk_release(Proj, Tab, FileH, Root) ->
     C = get(config),
@@ -797,5 +802,8 @@ get_id(Tab, Type, F, Dir)
                 component -> {Item#item.id, Item#item.guid};
                 file -> {ok, Item#item.id};
                 dir -> {ok, Item#item.id}
-            end
+            end;
+        Items ->
+            ?L("CLASH ~p with ~p", [{Tab, Type, F, Dir, Id}, Items]),
+            error(duplicate)
     end.

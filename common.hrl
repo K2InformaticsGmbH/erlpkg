@@ -41,6 +41,6 @@
 
 -record(config, {platform, app, desc, version, tmpSrcDir, topDir, rebar,
                  buildPath, pkgName, pkgCompany, pkgComment, privFolders,
-                 candle, light, upgradeCode}).
+                 candle, light, upgradeCode, patchCode}).
 
 -endif.
