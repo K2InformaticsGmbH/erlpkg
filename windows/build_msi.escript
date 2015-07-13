@@ -430,15 +430,43 @@ create_wxs() ->
                                  , [{capture, [1], list}, ungreedy, dotall]),
 
     ok = file:write(FileH,
-        "   <Property Id='NODENAME'>"++Node++"</Property>\n"
-        "   <Property Id='NODECOOKIE'>"++Cookie++"</Property>\n"
-        "   <Property Id='WEBSRVINTF'>"++DDErlIntf++":"++DDErlPort++"</Property>\n"
-        "   <Property Id='DBNODETYPE'>"++ImemNodeType++"</Property>\n"
+        "   <Property Id='NODENAME'>\n"
+        "       <RegistrySearch Id='Locate_NODENAME' Root='HKCU'\n"
+        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                       Name='NodeName' Type='raw' />\n"++Node++
+        "   </Property>\n"
+        "   <Property Id='NODECOOKIE'>\n"
+        "       <RegistrySearch Id='Locate_NODECOOKIE' Root='HKCU'\n"
+        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                       Name='NodeCookie' Type='raw' />\n"++Cookie++
+        "   </Property>\n"
+        "   <Property Id='WEBSRVINTF'>\n"
+        "       <RegistrySearch Id='Locate_WEBSRVINTF' Root='HKCU'\n"
+        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                       Name='WebSrvIntf' Type='raw' />\n"++DDErlIntf++":"++DDErlPort++
+        "   </Property>\n"
+        "   <Property Id='DBNODETYPE'>\n"
+        "       <RegistrySearch Id='Locate_DBNODETYPE' Root='HKCU'\n"
+        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                       Name='DbNodeType' Type='raw' />\n"++ImemNodeType++
+        "   </Property>\n"
         "   <Property Id='DBNODETYPE_DISC'>disc</Property>\n"
         "   <Property Id='DBNODETYPE_RAM'>ram</Property>\n"
-        "   <Property Id='DBNODESCHEMANAME'>"++ImemSchemaName++"</Property>\n"
-        "   <Property Id='DBCLUSTERMGRS'><![CDATA["++ImemClustMgrs++"]]></Property>\n"
-        "   <Property Id='DBINTF'>"++ImemIntf++":"++ImemPort++"</Property>\n\n"),
+        "   <Property Id='DBNODESCHEMANAME'>\n"
+        "       <RegistrySearch Id='Locate_DBNODESCHEMANAME' Root='HKCU'\n"
+        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                       Name='DbNodeSchemaName' Type='raw' />\n"++ImemSchemaName++
+        "   </Property>\n"
+        "   <Property Id='DBCLUSTERMGRS'>\n"
+        "       <RegistrySearch Id='Locate_DBCLUSTERMGRS' Root='HKCU'\n"
+        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                       Name='DbClusterManagers' Type='raw' />\n"
+        "       <![CDATA["++ImemClustMgrs++"]]></Property>\n"
+        "   <Property Id='DBINTF'>\n"
+        "       <RegistrySearch Id='Locate_DBINTF' Root='HKCU'\n"
+        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                       Name='DbInterface' Type='raw' />\n"++ImemIntf++":"++ImemPort++
+        "   </Property>\n\n"),
 
     % Read real installation folder from registry if exists
     ok = file:write(FileH,
@@ -594,6 +622,35 @@ create_wxs() ->
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='InstallPath' Type='string'\n"
         "                          Value='[INSTALLDIR]' KeyPath='no'/>\n"
+        % Remember all configurable parameters in registry
+        "           <RegistryValue Root='HKCU'\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                          Name='NodeName' Type='string'\n"
+        "                          Value='[NODENAME]' KeyPath='no'/>\n"
+        "           <RegistryValue Root='HKCU'\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                          Name='NodeCookie' Type='string'\n"
+        "                          Value='[NODECOOKIE]' KeyPath='no'/>\n"
+        "           <RegistryValue Root='HKCU'\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                          Name='WebSrvIntf' Type='string'\n"
+        "                          Value='[WEBSRVINTF]' KeyPath='no'/>\n"
+        "           <RegistryValue Root='HKCU'\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                          Name='DbNodeType' Type='string'\n"
+        "                          Value='[DBNODETYPE]' KeyPath='no'/>\n"
+        "           <RegistryValue Root='HKCU'\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                          Name='DbNodeSchemaName' Type='string'\n"
+        "                          Value='[DBNODESCHEMANAME]' KeyPath='no'/>\n"
+        "           <RegistryValue Root='HKCU'\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                          Name='DbClusterManagers' Type='string'\n"
+        "                          Value='[DBCLUSTERMGRS]' KeyPath='no'/>\n"
+        "           <RegistryValue Root='HKCU'\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                          Name='DbInterface' Type='string'\n"
+        "                          Value='[DBINTF]' KeyPath='no'/>\n"
         % Recursively remove application from path
         "           <util:RemoveFolderEx On='uninstall' Property='INSTALLDIR' />\n"
         "       </Component>\n"
