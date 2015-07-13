@@ -78,7 +78,8 @@ main([Cmd|CmdParams]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";
                             "-remsh",       NodeName,
                             "-name",        "console@"++Host,
                             "-setcookie",   proplists:get_value("-setcookie",
-                                                                VmArgsProps)
+                                                                VmArgsProps),
+                            "-hidden"
                            ]);
         "restart" ->
             main(["stop"|Rest]),

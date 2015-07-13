@@ -442,8 +442,8 @@ create_wxs() ->
 
     % Read real installation folder from registry if exists
     ok = file:write(FileH,
-        "   <Property Id='EXISTINGINSTALLDIR' Secure='yes'>\n"
-        "       <RegistrySearch Id='Locate_EXISTINGINSTALLDIR' Root='HKCU'\n"
+        "   <Property Id='INSTALLDIR' Secure='yes'>\n"
+        "       <RegistrySearch Id='Locate_INSTALLDIR' Root='HKCU'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='InstallPath' Type='directory' />\n"
         "   </Property>\n\n"),
@@ -482,13 +482,13 @@ create_wxs() ->
                        , "\\")
                   ++ "\"",
 
-    InsldSrvcCmd = "\"[EXISTINGINSTALLDIR]"
+    InsldSrvcCmd = "\"[INSTALLDIR]"
                   ++ string:join(
                        lists:sublist(EscriptExePath
                                      , length(EscriptExePath)-1, 2)
                        ++ ["escript.exe"]
                        , "\\")
-                  ++ "\" \"[EXISTINGINSTALLDIR]"
+                  ++ "\" \"[INSTALLDIR]"
                   ++ string:join(
                        lists:sublist(SrvcCtrlEsPath
                                      , length(SrvcCtrlEsPath), 1)
@@ -595,7 +595,7 @@ create_wxs() ->
         "                          Name='InstallPath' Type='string'\n"
         "                          Value='[INSTALLDIR]' KeyPath='no'/>\n"
         % Recursively remove application from path
-        "           <util:RemoveFolderEx On='uninstall' Property='EXISTINGINSTALLDIR' />\n"
+        "           <util:RemoveFolderEx On='uninstall' Property='INSTALLDIR' />\n"
         "       </Component>\n"
         "   </DirectoryRef>\n\n"),
 
