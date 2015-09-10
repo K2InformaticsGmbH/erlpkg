@@ -1,7 +1,7 @@
 # erlpkg
 Erlang OTP application multi platform deployment packaging scripts
 
-## Example Application with OTP release structure
+## Example OTP Application structure (with release)
 ```
 |-- deps
 |   `-- erlpkg
