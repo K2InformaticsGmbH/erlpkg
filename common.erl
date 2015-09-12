@@ -2,7 +2,7 @@
 
 -include("common.hrl").
 
--export([main/1,copy_first_time/1,run_port/2,run_port/3,patch_code_gen/0]).
+-export([main/1,copy_first_time/1,run_port/2,run_port/3,patch_code_gen/0,timestamp/0]).
 
 -define(Lg(__Fmt,__Args), ?L("~p : "++__Fmt, [?MODULE|__Args])).
 -define(Lg(__Fmt), ?Lg(__Fmt,[])).
@@ -202,3 +202,11 @@ patch_code_gen() ->
                           "~2..0B~2..0B~2..0B",
                           [Month,Day,Hour])
                        )}).
+
+timestamp() ->
+    TS = {_,_,Micro} = os:timestamp(),
+    {{Year,Month,Day},{Hour,Minute,Second}}
+    = calendar:now_to_universal_time(TS),
+    io_lib:format("~2..0w~2..0w~4..0w-~2..0w~2..0w~2..0w.~s",
+                  [Day,Month,Year,Hour,Minute,Second,
+                   string:left(integer_to_list(Micro), 3, $0)]).

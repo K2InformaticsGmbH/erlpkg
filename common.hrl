@@ -13,14 +13,23 @@
               , file_info
         }).
 
--define(E(__Fmt,__Args), io:format("[~p] "++__Fmt++"~n", [?LINE | __Args])).
+-define(TS, (fun() ->
+                    case catch common:timestamp() of
+                        {'EXIT', _} -> "";
+                        _TS -> _TS
+                    end
+             end)()
+       ).
+
+-define(E(__Fmt,__Args), io:format("~s[~3..0w] "++__Fmt++"~n",
+                                   [?TS,?LINE|__Args])).
 -define(E(__Fmt), ?E(__Fmt,[])).
 
 -define(L(__Fmt,__Args),
         (fun() ->
                  case get(verbose) of
                      V when V == true; V == undefined ->
-                         io:format("[~p] "++__Fmt++"~n", [?LINE | __Args]),
+                         io:format("~s[~3..0w] "++__Fmt++"~n", [?TS,?LINE|__Args]),
                          if V == undefined -> put(verbose, true);
                             true -> ok end;
                      false -> ok
@@ -38,9 +47,10 @@
 ).
 
 -define(FNJ(__Parts), filename:join(__Parts)).
+-define(FNJ(__Part1, __Part2), filename:join(__Part1, __Part2)).
 
 -record(config, {platform, app, desc, version, tmpSrcDir, topDir, rebar,
                  buildPath, pkgName, pkgCompany, pkgComment, privFolders,
-                 candle, light, upgradeCode, patchCode}).
+                 candle, light, upgradeCode, patchCode, tab}).
 
 -endif.

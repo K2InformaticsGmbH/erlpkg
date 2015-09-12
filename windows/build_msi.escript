@@ -90,6 +90,10 @@ main(Opts) when length(Opts) > 0 ->
         true -> put(skip_generate, true);
         false -> put(skip_generate, false)
     end,
+    case lists:member("-dets", Opts) of
+        true -> put(use_dets, true);
+        false -> put(use_dets, false)
+    end,
     main(main);
 main([]) ->
     put(verbose, false),
@@ -116,6 +120,7 @@ build_msi() ->
         _ ->
             ?L("skipped source tree build")
     end,
+    ?L("--------------------------------------------------------------------------------"),
     case get(skip_generate) of
         false ->
             rebar_generate(),
@@ -124,21 +129,35 @@ build_msi() ->
             common:patch_code_gen(),
             ?L("skipped rebar generate")
     end,
-    ?L("patchCode : ~s", [(get(config))#config.patchCode]),
-    case file:copy(?FNJ([C#config.topDir,"deps","erlpkg","windows",
+    ?L("--------------------------------------------------------------------------------"),
+    C1 = get(config),
+    ?L("patchCode : ~s", [C1#config.patchCode]),
+    case file:copy(?FNJ([C1#config.topDir,"deps","erlpkg","windows",
                          "service.escript"]),
-                   ?FNJ([C#config.tmpSrcDir,"rel",C#config.app,"bin",
-                         C#config.app++".escript"])) of
+                   ?FNJ([C1#config.tmpSrcDir,"rel",C1#config.app,"bin",
+                         C1#config.app++".escript"])) of
         {error, Error} ->
             exit({"failed to copy service.escript", Error});
         _ -> ok
     end,
-    {ok, _} = dets:open_file(C#config.app++"ids",
-                             [{ram_file, true},
-                              {file, C#config.app++"ids.dets"}, {keypos, 2}]),
+    case get(use_dets) of
+        true ->
+            C2 = C1#config{tab = C#config.app++"ids"},
+            {ok, _} = dets:open_file(C2#config.tab,
+                                     [{ram_file, true},
+                                      {file, C2#config.app++"ids.dets"}, {keypos, 2}]);
+        false ->
+            C2 = C1#config{tab = list_to_atom(C#config.app)},
+            ets:new(C2#config.tab, [named_table, {keypos, 2}])
+    end,
+    put(config, C2),
     create_wxs(),
     candle_light(),
-    ok = dets:close(C#config.app++"ids").
+    case get(use_dets) of
+        true ->
+            ok = dets:close(C2#config.tab);
+        false -> ok
+    end.
     
 uuid() ->
     string:to_upper(re:replace(os:cmd("uuidgen.exe"), "\r\n", "",
@@ -146,14 +165,20 @@ uuid() ->
 
 build_sources() ->
     C = get(config),
-    ?L("Source ~s", [C#config.topDir]),
     ?L("Build Source in ~s", [C#config.tmpSrcDir]),
+    ?L("--------------------------------------------------------------------------------"),
     ?OSCMD("rm -rf "++C#config.tmpSrcDir),
     ok = file:make_dir(C#config.tmpSrcDir),
     [begin
-        {ok, _} = file:copy(filename:join(C#config.topDir,F),
-                        filename:join(C#config.tmpSrcDir,F))
-    end || F <- ["rebar.config", "LICENSE", "README.md",
+         Src = ?FNJ(C#config.topDir,F),
+         case filelib:is_file(Src) of
+             true ->
+                 {ok, _} = file:copy(Src, ?FNJ(C#config.tmpSrcDir,F));
+             _ ->
+                 ?L("File ~s not found", [Src])
+         end
+    end || F <- ["rebar.config", "LICENSE", "LICENSE.md", "README",
+                 "README.md", "RELEASE", "RELEASE.md",
                  "RELEASE-"++string:to_upper(C#config.app)++".md"]],
     ?OSCMD("cp -L \""++C#config.rebar++"\" \""++C#config.tmpSrcDir++"\""),
     ?OSCMD("cp -L \""++filename:rootname(C#config.rebar)++"\" \""
@@ -223,31 +248,39 @@ copy_deep(PathPrefixLen, ProjDep, TargetDep) ->
 
 rebar_generate() ->
     C = get(config),
-    file:delete(C#config.app++"ids.dets"),
+    case get(use_dets) of
+        true -> file:delete(C#config.app++"ids.dets");
+        false -> nop
+    end,
     ?L("Clean Compile and generate..."),
+    ?L("--------------------------------------------------------------------------------"),
     Verbose = get(verbose), 
     Rebar = filename:join(C#config.tmpSrcDir,"rebar.bat"),
     common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["clean"], C#config.tmpSrcDir),
     common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["compile"], C#config.tmpSrcDir),
     common:patch_code_gen(),
-    common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["generate", "skip_deps=true"], C#config.tmpSrcDir).
+    common:run_port(Rebar, if Verbose -> ["-v"];
+                              true -> [] end ++ ["generate", "skip_deps=true"],
+                    C#config.tmpSrcDir),
+    ?L("--------------------------------------------------------------------------------").
 
 create_wxs() ->
     C = get(config),
     Proj = C#config.app,
     Version = C#config.version,
-    Tab = Proj++"ids",
-    {ok, FileH} = file:open(
-                    filename:join([C#config.buildPath,
-                                   lists:flatten([Proj,"-",Version,".wxs"])]),
-                    [write, raw]),
-    {ok, PRODUCT_GUID} = get_id(Tab, undefined, 'PRODUCT_GUID', undefined),
+    Tab = C#config.tab,
+    WxsFile = filename:join([C#config.buildPath, lists:flatten([Proj,"-",Version,".wxs"])]),
+    ?L("Create ~s", [WxsFile]),
+    ?L("--------------------------------------------------------------------------------"),
+    {ok, FileH} = file:open(WxsFile, [write, raw]),
+
+    {ok, PRODUCT_GUID} = get_id(undefined, 'PRODUCT_GUID', undefined),
     {ok, UPGRADE_GUID} = case C#config.upgradeCode of
                              '$no_upgrade_code_defined' ->
-                                 get_id(Tab, undefined, 'UPGRADE_GUID', undefined);
+                                 get_id(undefined, 'UPGRADE_GUID', undefined);
                              UpCode -> {ok, UpCode}
                          end,
-    {ok, ID} = get_id(Tab, undefined, C#config.pkgCompany, undefined),
+    {ok, ID} = get_id(undefined, C#config.pkgCompany, undefined),
     ok = file:write(FileH,
         "<?xml version='1.0' encoding='windows-1252'?>\n"
         "<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'"
@@ -284,8 +317,8 @@ create_wxs() ->
         "   <Directory Id='TARGETDIR' Name='SourceDir'>\n"),
 
     % AppData PATH
-    {CoDatId, CoDatGuId} = get_id(Tab, component, 'COMPANYDAT_GUID', undefined),
-    {AppDatId, AppDatGuId} = get_id(Tab, component, 'PRODUCTDAT_GUID', undefined),
+    {CoDatId, CoDatGuId} = get_id(component, 'COMPANYDAT_GUID', undefined),
+    {AppDatId, AppDatGuId} = get_id(component, 'PRODUCTDAT_GUID', undefined),
     ok = file:write(FileH,
         "     <Directory Id='CommonAppDataFolder' Name='CommonAppData'>\n"
         "       <Directory Id='COMPANYDAT' Name='"++C#config.pkgCompany++"'>\n"
@@ -321,23 +354,20 @@ create_wxs() ->
     ?L("finished ProgramFilesFolder section"),
 
     % Property references
-    [BootDir] = dets:select(Tab, [{#item{type=dir, name=Version, _='_'}, [],
-                                   ['$_']}]),
-    [EscriptExe] = dets:select(Tab, [{#item{type=component, name="escript.exe",
-                                            _='_'}, [], ['$_']}]),
-    [EscriptExeFile] = dets:select(Tab, [{#item{type=file, name="escript.exe",
-                                            guid=undefined, _='_'}, [], ['$_']}]),
-    [EditConfEs] = dets:select(Tab, [{#item{type=component,
-                                             name="editconfs.escript", _='_'},
-                                       [], ['$_']}]),
-    [SrvcCtrlEs] = dets:select(Tab, [{#item{type=component,
-                                            name=Proj++".escript", _='_'},
-                                      [], ['$_']}]),
-    [SrvcCtrlEsFile] = dets:select(Tab, [{#item{type=file, name=Proj++".escript",
-                                                guid=undefined, _='_'}, [], ['$_']}]),
+    [BootDir] = select([{#item{type=dir, name=Version, _='_'}, [], ['$_']}]),
+    [EscriptExe] = select([{#item{type=component, name="escript.exe",_='_'},
+                            [], ['$_']}]),
+    [EscriptExeFile] = select([{#item{type=file, name="escript.exe",
+                                      guid=undefined, _='_'}, [], ['$_']}]),
+    [EditConfEs] = select([{#item{type=component, name="editconfs.escript",
+                                  _='_'}, [], ['$_']}]),
+    [SrvcCtrlEs] = select([{#item{type=component, name=Proj++".escript",
+                                  _='_'}, [], ['$_']}]),
+    [SrvcCtrlEsFile] = select([{#item{type=file, name=Proj++".escript",
+                                      guid=undefined, _='_'}, [], ['$_']}]),
 
-    {ProgFolderId, ProgFolderGuId} = get_id(Tab, component, 'PROGSMENUFOLDER_GUID', undefined),
-    {DsktpShortId, DsktpShortGuId} = get_id(Tab, component, 'DESKTOPSHORTCUT_GUID', undefined),
+    {ProgFolderId, ProgFolderGuId} = get_id(component, 'PROGSMENUFOLDER_GUID', undefined),
+    {DsktpShortId, DsktpShortGuId} = get_id(component, 'DESKTOPSHORTCUT_GUID', undefined),
 
     ok = file:write(FileH,
         "     <Directory Id='ProgramMenuFolder' Name='Programs'>\n"
@@ -393,12 +423,10 @@ create_wxs() ->
 
     ?L("added custom setup dialog"),
 
-    [VmArgsFile] = dets:select(Tab, [{#item{type=file
-                                             , name="vm.args", _='_'}
-                                       , [], ['$_']}]),
-    [SysConfigFile] = dets:select(Tab, [{#item{type=file
-                                             , name="sys.config", _='_'}
-                                       , [], ['$_']}]),
+    [VmArgsFile] = select([{#item{type=file, name="vm.args", _='_'}, [],
+                            ['$_']}]),
+    [SysConfigFile] = select([{#item{type=file, name="sys.config", _='_'}, [],
+                               ['$_']}]),
     {ok, VmArgsBin} = file:read_file(filename:join(VmArgsFile#item.path, "vm.args")),
     {ok, SysConfigBin} = file:read_file(filename:join(SysConfigFile#item.path, "sys.config")),
     {match, [Node]} = re:run(VmArgsBin
@@ -695,7 +723,8 @@ create_wxs() ->
 
     ?L("finised building wxs"),
 
-    ok = file:close(FileH).
+    ok = file:close(FileH),
+    ?L("--------------------------------------------------------------------------------").
 
 candle_light() ->
     Verbose = get(verbose),
@@ -731,7 +760,7 @@ generate_msi_name() ->
     MsiDate = io_lib:format("~4..0B~2..0B~2..0B_~2..0B~2..0B~2..0B",
                             [Y,M,D,H,Mn,S]),
     lists:flatten([C#config.app,"-",
-                   C#config.version,".",C#config.patchCode,"_",
+                   C#config.version,".", C#config.patchCode,"_",
                    MsiDate,".msi"]).
 
 walk_release(Proj, Tab, FileH, Root) ->
@@ -750,7 +779,7 @@ walk_release(PathPrefixLen, Tab, FileH, [F|Files], Dir, N) ->
         true ->
             NewDirLevel = filename:join([Dir,F]),
             FilesAtThisLevel = filelib:wildcard("*", NewDirLevel),
-            {ok, DirId} = get_id(Tab, dir, F, Dir),
+            {ok, DirId} = get_id(dir, F, Dir),
             ok = file:write(FileH, lists:duplicate(N,32)++
                             "<Directory Id='"++DirId++
                                             "' Name='"++F++"'>\n"),
@@ -759,8 +788,8 @@ walk_release(PathPrefixLen, Tab, FileH, [F|Files], Dir, N) ->
             ?L("~s/", [string:substr(NewDirLevel, PathPrefixLen)]);
         false ->
             FilePath = get_filepath(Dir, F),
-            {Id, GuID} = get_id(Tab, component, F, Dir),
-            {ok, FileId} = get_id(Tab, file, F, Dir),
+            {Id, GuID} = get_id(component, F, Dir),
+            {ok, FileId} = get_id(file, F, Dir),
             ok = file:write(FileH, lists:duplicate(N+3,32)++
                 "<Component Id='"++Id++"' Guid='"++GuID++"'>\n"
                 ++lists:duplicate(N+3,32)++
@@ -772,7 +801,6 @@ walk_release(PathPrefixLen, Tab, FileH, [F|Files], Dir, N) ->
     walk_release(PathPrefixLen, Tab, FileH, Files, Dir, N).
 
 build_features(Proj, Version, FileH) ->
-    Tab = Proj++"ids",
     ok = file:write(FileH,
         "   <Feature Id='Complete' Title='"++Proj++"-"++Version++"'"
                     " Description='The complete package.'"
@@ -781,39 +809,36 @@ build_features(Proj, Version, FileH) ->
         "      <Feature Id='MainProgram' Title='"++Proj++"-"++Version
                                                         ++" service'"
                     " Description='The service.' Level='1'>\n"),
-    dets:sync(Tab),
-    dets:traverse(Tab,
-                  fun(#item{type=component, id = Id}) ->
-                          ok = file:write(FileH
-                                          , "         <ComponentRef Id='"
-                                          ++Id++"' />\n"),
-                          continue;
-                     (_) -> continue
-                  end),
+    sync(),
+    foreach(fun(#item{type=component, id = Id}) ->
+                    ok = file:write(
+                           FileH, "         <ComponentRef Id='"++Id++"' />\n");
+               (_) -> ok
+            end),
     ok = file:write(FileH, "      </Feature>\n\n"),
     ok = file:write(FileH, "   </Feature>\n\n").
 
-get_id(Tab, undefined, Field, undefined) when is_list(Field) ->
+get_id(undefined, Field, undefined) when is_list(Field) ->
     Id = "id_"++?H(Field),
-    case dets:lookup(Tab, Id) of
+    case lookup(Id) of
         [] ->
             Item = #item{id = Id, name = Field},
-            ok = dets:insert(Tab, Item),
+            ok = insert(Item),
             {ok, Item#item.id};
         [#item{} = Item] ->
             {ok, Item#item.id}
     end;
-get_id(Tab, Type, Field, undefined) when is_atom(Field) ->
+get_id(Type, Field, undefined) when is_atom(Field) ->
     Id = "id_"++?H(Field),
-    case dets:lookup(Tab, Id) of
+    case lookup(Id) of
         [] ->
             Item = #item{id = Id, name = Field, guid = uuid()},
             case Type of
                 component ->
-                    ok = dets:insert(Tab, Item#item{type=component}),
+                    ok = insert(Item#item{type=component}),
                     {Item#item.id, Item#item.guid};
                 _ ->
-                    ok = dets:insert(Tab, Item),
+                    ok = insert(Item),
                     {ok, Item#item.guid}
             end;
         [#item{} = Item] ->
@@ -822,13 +847,13 @@ get_id(Tab, Type, Field, undefined) when is_atom(Field) ->
                 _ -> {ok, Item#item.guid}
             end
     end;
-get_id(Tab, Type, F, Dir)
+get_id(Type, F, Dir)
   when Type =:= component;
        Type =:= file;
        Type =:= dir ->
     Id = "id_"++?H({Type, filename:join([Dir, F])}),
     {ok, FI} = file:read_file_info(filename:join([Dir, F])),
-    case dets:lookup(Tab, Id) of
+    case lookup(Id) of
         [] ->
             Item = #item{id = Id
                          , type = Type
@@ -838,7 +863,7 @@ get_id(Tab, Type, F, Dir)
                          , path = Dir
                          , file_info = FI
                         },
-            ok = dets:insert(Tab, Item),
+            ok = insert(Item),
             case Type of
                 component -> {Item#item.id, Item#item.guid};
                 file -> {ok, Item#item.id};
@@ -854,13 +879,62 @@ get_id(Tab, Type, F, Dir)
             Item = I#item{guid = if Type =:= component -> uuid();
                                     true -> undefined end
                           , file_info = FI},
-            ok = dets:insert(Tab, Item),
+            ok = insert(Item),
             case Type of
                 component -> {Item#item.id, Item#item.guid};
                 file -> {ok, Item#item.id};
                 dir -> {ok, Item#item.id}
             end;
         Items ->
-            ?L("CLASH ~p with ~p", [{Tab, Type, F, Dir, Id}, Items]),
+            ?L("CLASH ~p with ~p", [{Type, F, Dir, Id}, Items]),
             error(duplicate)
+    end.
+
+select(MatchSpec) ->
+    C = get(config),
+    case get(use_dets) of
+        true ->
+            dets:select(C#config.tab, MatchSpec);
+        false ->
+            ets:select(C#config.tab, MatchSpec)
+    end.
+
+insert(Item) ->
+    C = get(config),
+    case get(use_dets) of
+        true -> ok = dets:insert(C#config.tab, Item);
+        false ->
+            true = ets:insert(C#config.tab, Item)
+    end,
+    ok.
+
+lookup(Id) ->
+    C = get(config),
+    case get(use_dets) of
+        true -> dets:lookup(C#config.tab, Id);
+        false -> ets:lookup(C#config.tab, Id)
+    end.
+
+
+foreach(Fun) when is_function(Fun, 1) ->
+    C = get(config),
+    case get(use_dets) of
+        true ->
+            dets:traverse(C#config.tab,
+                          fun(Row) ->
+                                  Fun(Row),
+                                  continue
+                          end);
+        false ->
+            ets:foldl(fun(Row, '$unused') ->
+                              Fun(Row),
+                              '$unused'
+                      end, '$unused', C#config.tab)
+    end.
+
+sync() ->
+    C = get(config),
+    case get(use_dets) of
+        true -> dets:sync(C#config.tab);
+        false -> nop
     end.
