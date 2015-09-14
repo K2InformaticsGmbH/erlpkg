@@ -28,9 +28,9 @@
 -define(L(__Fmt,__Args),
         (fun() ->
                  case get(verbose) of
-                     V when V == true; V == undefined ->
+                     __V when __V == true; __V == undefined ->
                          io:format("~s[~3..0w] "++__Fmt++"~n", [?TS,?LINE|__Args]),
-                         if V == undefined -> put(verbose, true);
+                         if __V == undefined -> put(verbose, true);
                             true -> ok end;
                      false -> ok
                  end
@@ -51,6 +51,6 @@
 
 -record(config, {platform, app, desc, version, tmpSrcDir, topDir, rebar,
                  buildPath, pkgName, pkgCompany, pkgComment, privFolders,
-                 candle, light, upgradeCode, patchCode, tab}).
+                 candle, light, upgradeCode, patchCode, tab, stats}).
 
 -endif.

@@ -56,8 +56,9 @@ main(main) ->
                   UpCode -> UpCode
               end,
     C1 = get(config),
-    put(config, C1#config{upgradeCode = UpgradeCode}),
+    put(config, C1#config{upgradeCode = UpgradeCode, stats = #{}}),
 
+    start_time(total),
     C = get(config),
     ?L("--------------------------------------------------------------------------------"),
     ?L("packaging ~p", [C#config.app]),
@@ -76,7 +77,9 @@ main(main) ->
     ?L("candle.exe  : ~s", [C#config.candle]),
     ?L("light.exe   : ~s", [C#config.light]),
     ?L("--------------------------------------------------------------------------------"),
-    build_msi();
+    build_msi(),
+    end_time(total),
+    print_stats();
 main(Opts) when length(Opts) > 0 ->
     case lists:member("-v", Opts) of
         true -> put(verbose, true);
@@ -100,6 +103,42 @@ main([]) ->
     put(skip_build, false),
     put(skip_generate, false),
     main(main).
+
+print_stats() ->
+    C = get(config),
+    ?L("--------------------------------------------------------------------------------"),
+    ?L("total build time ~s", [ft(maps:get(total, C#config.stats))]),
+    ?L("--------------------------------------------------------------------------------"),
+    maps:fold(fun(K, V, _) when K /= total -> ?L("~p time ~s", [K, ft(V)]);
+                 (_, _, _) -> undefined
+              end, undefined, C#config.stats),
+    ?L("--------------------------------------------------------------------------------").
+
+ft(T) when T < 1000 -> integer_to_list(T)++"us";
+ft(T) when T >= 1000, T < 1000000 -> integer_to_list(T div 1000)++"ms";
+ft(T) when T >= 1000000 -> integer_to_list(T div 1000000)++"s".
+
+start_time(Field) ->
+    Start = os:timestamp(),
+    Fun = fun() ->
+                  C = get(config),
+                  put(config,
+                      C#config{
+                        stats = maps:put(Field,
+                                         timer:now_diff(os:timestamp(), Start),
+                                         C#config.stats)
+                       })
+          end,
+    C = get(config),
+    put(config, C#config{stats = maps:put(Field, Fun, C#config.stats)}).
+
+end_time(Field) ->
+    C = get(config),
+    case maps:get(Field, C#config.stats, '$not_defined') of
+        '$not_defined' -> ?L("Stat ~p is not defined", [Field]);
+        V when is_function(V,0) -> V();
+        _ -> nop
+    end.
 
 copy_to_msi(File) ->
     C = get(config),
@@ -164,6 +203,7 @@ uuid() ->
                                [{return, list}])).
 
 build_sources() ->
+    start_time(copy_src),
     C = get(config),
     ?L("Build Source in ~s", [C#config.tmpSrcDir]),
     ?L("--------------------------------------------------------------------------------"),
@@ -205,10 +245,13 @@ build_sources() ->
                            TargetDir)
              end || Folder <- Folders]
     end,
+    end_time(copy_src),
 
+    start_time(copy_deps),
     Deps = filename:join(C#config.tmpSrcDir, "deps"),
     ok = file:make_dir(Deps),
-    copy_deep(PathPrfxLen, filename:join([C#config.topDir, "deps"]), Deps).
+    copy_deep(PathPrfxLen, filename:join([C#config.topDir, "deps"]), Deps),
+    end_time(copy_deps).
 
 copy_folder(PathPrefixLen, Src, Target, Folders, Match) ->
     ok = file:make_dir(filename:join([Target|Folders])),
@@ -247,6 +290,7 @@ copy_deep(PathPrefixLen, ProjDep, TargetDep) ->
      || D <- filelib:wildcard("*", ProjDep)].
 
 rebar_generate() ->
+    start_time(rebar_generate),
     C = get(config),
     case get(use_dets) of
         true -> file:delete(C#config.app++"ids.dets");
@@ -262,9 +306,11 @@ rebar_generate() ->
     common:run_port(Rebar, if Verbose -> ["-v"];
                               true -> [] end ++ ["generate", "skip_deps=true"],
                     C#config.tmpSrcDir),
+    end_time(rebar_generate),
     ?L("--------------------------------------------------------------------------------").
 
 create_wxs() ->
+    start_time(create_wxs),
     C = get(config),
     Proj = C#config.app,
     Version = C#config.version,
@@ -724,9 +770,11 @@ create_wxs() ->
     ?L("finised building wxs"),
 
     ok = file:close(FileH),
+    end_time(create_wxs),
     ?L("--------------------------------------------------------------------------------").
 
 candle_light() ->
+    start_time(candle_light),
     Verbose = get(verbose),
     C = get(config),
     {ok, CurDir} = file:get_cwd(),
@@ -742,7 +790,8 @@ candle_light() ->
              ++ ["-ext", "WixUtilExtension",
                  "-ext", "WixUIExtension",
                  "-out", MsiFile | WixObjs]),
-    ok = file:set_cwd(CurDir).
+    ok = file:set_cwd(CurDir),
+    end_time(candle_light).
 
 get_filepath(Dir, F) ->
     FilePathNoRel =
