@@ -2,7 +2,7 @@
 
 -include("common.hrl").
 
--export([main/1,copy_first_time/1,run_port/2,run_port/3,patch_code_gen/0,timestamp/0]).
+-export([main/1,copy_first_time/1,run_port/2,run_port/3,patch_code_gen/0,timestamp/0,print_stats/0]).
 
 -define(Lg(__Fmt,__Args), ?L("~p : "++__Fmt, [?MODULE|__Args])).
 -define(Lg(__Fmt), ?Lg(__Fmt,[])).
@@ -77,7 +77,7 @@ main(ScriptPath) when is_list(ScriptPath) ->
                       '$not_found' -> "*";
                       PrivDirs -> PrivDirs
                   end,
-        put(config, Conf#config{pkgName = PkgName, pkgCompany = PkgCompany,
+        put(config, Conf#config{pkgName = PkgName, pkgCompany = PkgCompany, stats = #{},
                                 pkgComment = PkgComment, privFolders = PrivFolders})
     catch _:Error ->
               ?Lg("ERROR ~p~n~p", [Error, erlang:get_stacktrace()])
@@ -202,6 +202,20 @@ patch_code_gen() ->
                           "~2..0B~2..0B~2..0B",
                           [Month,Day,Hour])
                        )}).
+
+print_stats() ->
+    C = get(config),
+    ?L("--------------------------------------------------------------------------------"),
+    ?L("total build time ~s", [ft(maps:get(total, C#config.stats))]),
+    ?L("--------------------------------------------------------------------------------"),
+    maps:fold(fun(K, V, _) when K /= total -> ?L("~p time ~s", [K, ft(V)]);
+                 (_, _, _) -> undefined
+              end, undefined, C#config.stats),
+    ?L("--------------------------------------------------------------------------------").
+
+ft(T) when T < 1000 -> integer_to_list(T)++"us";
+ft(T) when T >= 1000, T < 1000000 -> integer_to_list(T div 1000)++"ms";
+ft(T) when T >= 1000000 -> integer_to_list(T div 1000000)++"s".
 
 timestamp() ->
     TS = {_,_,Micro} = os:timestamp(),

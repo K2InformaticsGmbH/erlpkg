@@ -56,7 +56,7 @@ main(main) ->
                   UpCode -> UpCode
               end,
     C1 = get(config),
-    put(config, C1#config{upgradeCode = UpgradeCode, stats = #{}}),
+    put(config, C1#config{upgradeCode = UpgradeCode}),
 
     start_time(total),
     C = get(config),
@@ -79,7 +79,7 @@ main(main) ->
     ?L("--------------------------------------------------------------------------------"),
     build_msi(),
     end_time(total),
-    print_stats();
+    common:print_stats();
 main(Opts) when length(Opts) > 0 ->
     case lists:member("-v", Opts) of
         true -> put(verbose, true);
@@ -103,20 +103,6 @@ main([]) ->
     put(skip_build, false),
     put(skip_generate, false),
     main(main).
-
-print_stats() ->
-    C = get(config),
-    ?L("--------------------------------------------------------------------------------"),
-    ?L("total build time ~s", [ft(maps:get(total, C#config.stats))]),
-    ?L("--------------------------------------------------------------------------------"),
-    maps:fold(fun(K, V, _) when K /= total -> ?L("~p time ~s", [K, ft(V)]);
-                 (_, _, _) -> undefined
-              end, undefined, C#config.stats),
-    ?L("--------------------------------------------------------------------------------").
-
-ft(T) when T < 1000 -> integer_to_list(T)++"us";
-ft(T) when T >= 1000, T < 1000000 -> integer_to_list(T div 1000)++"ms";
-ft(T) when T >= 1000000 -> integer_to_list(T div 1000000)++"s".
 
 start_time(Field) ->
     Start = os:timestamp(),
