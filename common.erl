@@ -188,7 +188,7 @@ log_cmd(Cmd, Port) when is_port(Port) ->
 
 patch_code_gen() ->
     C = get(config),
-    BeamPath = filename:join(C#config.topDir, "ebin"),
+    BeamPath = filename:join(C#config.tmpSrcDir, "ebin"),
     [{{{_,Month,Day},{Hour,_,_}},_}|_]
     = lists:reverse(
         lists:usort(
