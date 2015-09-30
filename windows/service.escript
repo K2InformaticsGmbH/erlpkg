@@ -52,11 +52,11 @@ main([Cmd|CmdParams]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";
             run_port(ErlSrv, ["add",            SrvName,
                               "-c",             ServiceDescription,
                               "-name",          NodeName,
-                              "-w",             "\""++RootPath++"\"",
-                              "-m",             "\""++StartErl++"\"",     
-                              "-args",          "\" ++ "++AppName++" ++ "
-                                                    ++RootPath++"\"",
-                              "-stopaction",    "\"init:stop().\""]);
+                              "-w",             RootPath,
+                              "-m",             StartErl,
+                              "-args",          " ++ "++AppName++" ++ "
+                                                ++RootPath,
+                              "-stopaction",    "init:stop()."]);
         "uninstall" ->
             run_port(ErlSrv, ["stop", SrvName]),
             run_port(ErlSrv, ["remove", SrvName]),
