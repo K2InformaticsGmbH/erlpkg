@@ -173,7 +173,7 @@ build_msi() ->
                                       {file, C2#config.app++"ids.dets"}, {keypos, 2}]);
         false ->
             C2 = C1#config{tab = list_to_atom(C#config.app)},
-            ets:new(C2#config.tab, [named_table, {keypos, 2}])
+            ets:new(C2#config.tab, [public, named_table, {keypos, 2}])
     end,
     put(config, C2),
     create_wxs(),
@@ -375,7 +375,7 @@ create_wxs() ->
         "       <Directory Id='"++ID++"' Name='"++C#config.pkgCompany++"'>\n"
         "         <Directory Id='INSTALLDIR' Name='"++C#config.pkgName++"'>\n"),
 
-    walk_release(Proj, Tab, FileH, filename:absname(C#config.tmpSrcDir)),
+    walk_release(Proj, FileH, filename:absname(C#config.tmpSrcDir)),
     ?L("finished walking OTP release"),
     
     ok = file:write(FileH,
@@ -798,7 +798,7 @@ generate_msi_name() ->
                    C#config.version,".", C#config.patchCode,"_",
                    MsiDate,".msi"]).
 
-walk_release(Proj, Tab, FileH, Root) ->
+walk_release(Proj, FileH, Root) ->
     C = get(config),
     ReleaseRoot = filename:join([Root,"rel",Proj]),
     case filelib:is_dir(ReleaseRoot) of
@@ -808,32 +808,49 @@ walk_release(Proj, Tab, FileH, Root) ->
         false -> ?L("~p is not a directory", [ReleaseRoot])
     end.
 
-walk_release(_PathPrefixLen, _FileH, [], _Dir, _N) -> ok;
-walk_release(PathPrefixLen, FileH, [F|Files], Dir, N) ->
-    case filelib:is_dir(filename:join([Dir,F])) of
-        true ->
-            NewDirLevel = filename:join([Dir,F]),
-            FilesAtThisLevel = filelib:wildcard("*", NewDirLevel),
-            {ok, DirId} = get_id(dir, F, Dir),
-            ok = file:write(FileH, lists:duplicate(N,32)++
-                            "<Directory Id='"++DirId++
-                                            "' Name='"++F++"'>\n"),
-            walk_release(PathPrefixLen, FileH, FilesAtThisLevel, NewDirLevel, N+3),
-            ok = file:write(FileH, lists:duplicate(N,32)++"</Directory>\n"),
-            ?L("~s/", [string:substr(NewDirLevel, PathPrefixLen)]);
-        false ->
-            FilePath = get_filepath(Dir, F),
-            {Id, GuID} = get_id(component, F, Dir),
-            {ok, FileId} = get_id(file, F, Dir),
-            ok = file:write(FileH, lists:duplicate(N+3,32)++
-                "<Component Id='"++Id++"' Guid='"++GuID++"'>\n"
-                ++lists:duplicate(N+3,32)++
-                "   <File Id='"++FileId++"' Name='"++F++
-                                "' DiskId='1' Source='"++FilePath++"'"
-                " KeyPath='yes' />\n"++lists:duplicate(N+3,32)++
-                "</Component>\n")
-    end,
-    walk_release(PathPrefixLen, FileH, Files, Dir, N).
+walk_release(PathPrefixLen, FileH, Files, Dir, N) ->
+    ok = file:write(FileH, lists:flatten(walk_release(PathPrefixLen, Files, Dir, N))).
+walk_release(PathPrefixLen, Files, Dir, N) ->
+    Pids = lists:map(
+      fun(F) ->
+              Self = self(),
+              Conf = get(config),
+              UseDets = get(use_dets),
+              spawn(
+                fun() ->
+                        put(config, Conf),
+                        put(use_dets, UseDets),
+                        case filelib:is_dir(filename:join([Dir,F])) of
+                            true ->
+                                NewDirLevel = filename:join([Dir,F]),
+                                FilesAtThisLevel = filelib:wildcard("*", NewDirLevel),
+                                {ok, DirId} = get_id(dir, F, Dir),
+                                ?L("~s/", [string:substr(NewDirLevel, PathPrefixLen)]),
+                                Self ! {self(),
+                                        [lists:duplicate(N,32), "<Directory Id='", DirId, "' Name='", F, "'>\n",
+                                         walk_release(PathPrefixLen, FilesAtThisLevel, NewDirLevel, N+3),
+                                         lists:duplicate(N,32), "</Directory>\n"]};
+                            false ->
+                                FilePath = get_filepath(Dir, F),
+                                {Id, GuID} = get_id(component, F, Dir),
+                                {ok, FileId} = get_id(file, F, Dir),
+                                Self ! {self(),
+                                        [lists:duplicate(N+3,32),"<Component Id='",Id,"' Guid='",GuID,"'>\n",lists:duplicate(N+3,32),
+                                         "   <File Id='",FileId,"' Name='",F,
+                                         "' DiskId='1' Source='",FilePath,"'"
+                                         " KeyPath='yes' />\n",lists:duplicate(N+3,32),
+                                         "</Component>\n"]}
+                        end
+                end)
+      end, Files),
+    collect(Pids).
+
+collect(Pids) -> collect(Pids, []).
+collect([], Acc) -> Acc;
+collect(Pids, Acc) ->
+    receive
+        {P,S} -> collect(Pids -- [P], [S|Acc])
+    end.
 
 build_features(Proj, Version, FileH) ->
     ok = file:write(FileH,
