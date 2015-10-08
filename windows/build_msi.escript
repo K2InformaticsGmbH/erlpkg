@@ -371,7 +371,7 @@ create_wxs() ->
 
     % ProgramFiles PATH
     ok = file:write(FileH,
-        "     <Directory Id='ProgramFilesFolder' Name='PFiles'>\n"
+        "     <Directory Id='ProgramFiles64Folder' Name='PFiles'>\n"
         "       <Directory Id='"++ID++"' Name='"++C#config.pkgCompany++"'>\n"
         "         <Directory Id='INSTALLDIR' Name='"++C#config.pkgName++"'>\n"),
 
@@ -381,9 +381,9 @@ create_wxs() ->
     ok = file:write(FileH,
         "         </Directory> <!-- PRODUCT -->\n"
         "       </Directory> <!-- COMPANY -->\n"
-        "     </Directory> <!-- ProgramFilesFolder -->\n"),
+        "     </Directory> <!-- ProgramFiles64Folder -->\n"),
 
-    ?L("finished ProgramFilesFolder section"),
+    ?L("finished ProgramFiles64Folder section"),
 
     % Property references
     [BootDir] = select([{#item{type=dir, name=Version, _='_'}, [], ['$_']}]),
@@ -491,39 +491,39 @@ create_wxs() ->
 
     ok = file:write(FileH,
         "   <Property Id='NODENAME'>\n"
-        "       <RegistrySearch Id='Locate_NODENAME' Root='HKCU'\n"
+        "       <RegistrySearch Id='Locate_NODENAME' Root='HKLM'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='NodeName' Type='raw' />\n"++Node++
         "   </Property>\n"
         "   <Property Id='NODECOOKIE'>\n"
-        "       <RegistrySearch Id='Locate_NODECOOKIE' Root='HKCU'\n"
+        "       <RegistrySearch Id='Locate_NODECOOKIE' Root='HKLM'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='NodeCookie' Type='raw' />\n"++Cookie++
         "   </Property>\n"
         "   <Property Id='WEBSRVINTF'>\n"
-        "       <RegistrySearch Id='Locate_WEBSRVINTF' Root='HKCU'\n"
+        "       <RegistrySearch Id='Locate_WEBSRVINTF' Root='HKLM'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='WebSrvIntf' Type='raw' />\n"++DDErlIntf++":"++DDErlPort++
         "   </Property>\n"
         "   <Property Id='DBNODETYPE'>\n"
-        "       <RegistrySearch Id='Locate_DBNODETYPE' Root='HKCU'\n"
+        "       <RegistrySearch Id='Locate_DBNODETYPE' Root='HKLM'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='DbNodeType' Type='raw' />\n"++ImemNodeType++
         "   </Property>\n"
         "   <Property Id='DBNODETYPE_DISC'>disc</Property>\n"
         "   <Property Id='DBNODETYPE_RAM'>ram</Property>\n"
         "   <Property Id='DBNODESCHEMANAME'>\n"
-        "       <RegistrySearch Id='Locate_DBNODESCHEMANAME' Root='HKCU'\n"
+        "       <RegistrySearch Id='Locate_DBNODESCHEMANAME' Root='HKLM'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='DbNodeSchemaName' Type='raw' />\n"++ImemSchemaName++
         "   </Property>\n"
         "   <Property Id='DBCLUSTERMGRS'>\n"
-        "       <RegistrySearch Id='Locate_DBCLUSTERMGRS' Root='HKCU'\n"
+        "       <RegistrySearch Id='Locate_DBCLUSTERMGRS' Root='HKLM'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='DbClusterManagers' Type='raw' />\n"
         "       <![CDATA["++ImemClustMgrs++"]]></Property>\n"
         "   <Property Id='DBINTF'>\n"
-        "       <RegistrySearch Id='Locate_DBINTF' Root='HKCU'\n"
+        "       <RegistrySearch Id='Locate_DBINTF' Root='HKLM'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='DbInterface' Type='raw' />\n"++ImemIntf++":"++ImemPort++
         "   </Property>\n\n"),
@@ -531,7 +531,7 @@ create_wxs() ->
     % Read real installation folder from registry if exists
     ok = file:write(FileH,
         "   <Property Id='INSTALLDIR' Secure='yes'>\n"
-        "       <RegistrySearch Id='Locate_INSTALLDIR' Root='HKCU'\n"
+        "       <RegistrySearch Id='Locate_INSTALLDIR' Root='HKLM'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='InstallPath' Type='directory' />\n"
         "   </Property>\n\n"),
@@ -673,41 +673,41 @@ create_wxs() ->
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationProgramMenuFolder' On='uninstall'/>\n"
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='programmenu' Type='string'\n"
         "                          Value='"++PRODUCT_GUID++"' KeyPath='yes'/>\n"
         % Remember real installation path in registry
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='InstallPath' Type='string'\n"
         "                          Value='[INSTALLDIR]' KeyPath='no'/>\n"
         % Remember all configurable parameters in registry
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='NodeName' Type='string'\n"
         "                          Value='[NODENAME]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='NodeCookie' Type='string'\n"
         "                          Value='[NODECOOKIE]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='WebSrvIntf' Type='string'\n"
         "                          Value='[WEBSRVINTF]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='DbNodeType' Type='string'\n"
         "                          Value='[DBNODETYPE]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='DbNodeSchemaName' Type='string'\n"
         "                          Value='[DBNODESCHEMANAME]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='DbClusterManagers' Type='string'\n"
         "                          Value='[DBCLUSTERMGRS]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='DbInterface' Type='string'\n"
         "                          Value='[DBINTF]' KeyPath='no'/>\n"
@@ -734,7 +734,7 @@ create_wxs() ->
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationDesktopFolder' On='uninstall'/>\n"
-        "           <RegistryValue Root='HKCU'\n"
+        "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='desktop' Type='integer'\n"
         "                          Value='1' KeyPath='yes'/>\n"
@@ -768,7 +768,7 @@ candle_light() ->
     Wxses = filelib:wildcard("*.wxs"),
     ?L("candle with ~p", [Wxses]),
     common:run_port(C#config.candle, if Verbose -> ["-v"]; true -> [] end
-             ++ ["-ext", "WixUtilExtension" | Wxses]),
+             ++ ["-arch", "x64", "-ext", "WixUtilExtension" | Wxses]),
     WixObjs = filelib:wildcard("*.wixobj"),
     MsiFile = generate_msi_name(),
     ?L("light ~s with ~p", [MsiFile, WixObjs]),
@@ -803,13 +803,13 @@ walk_release(Proj, Tab, FileH, Root) ->
     ReleaseRoot = filename:join([Root,"rel",Proj]),
     case filelib:is_dir(ReleaseRoot) of
         true ->
-            walk_release(length(C#config.tmpSrcDir)+2, Tab, FileH,
+            walk_release(length(C#config.tmpSrcDir)+2, FileH,
                          filelib:wildcard("*", ReleaseRoot), ReleaseRoot, 12);
         false -> ?L("~p is not a directory", [ReleaseRoot])
     end.
 
-walk_release(_PathPrefixLen, _Tab, _FileH, [], _Dir, _N) -> ok;
-walk_release(PathPrefixLen, Tab, FileH, [F|Files], Dir, N) ->
+walk_release(_PathPrefixLen, _FileH, [], _Dir, _N) -> ok;
+walk_release(PathPrefixLen, FileH, [F|Files], Dir, N) ->
     case filelib:is_dir(filename:join([Dir,F])) of
         true ->
             NewDirLevel = filename:join([Dir,F]),
@@ -818,7 +818,7 @@ walk_release(PathPrefixLen, Tab, FileH, [F|Files], Dir, N) ->
             ok = file:write(FileH, lists:duplicate(N,32)++
                             "<Directory Id='"++DirId++
                                             "' Name='"++F++"'>\n"),
-            walk_release(PathPrefixLen, Tab, FileH, FilesAtThisLevel, NewDirLevel, N+3),
+            walk_release(PathPrefixLen, FileH, FilesAtThisLevel, NewDirLevel, N+3),
             ok = file:write(FileH, lists:duplicate(N,32)++"</Directory>\n"),
             ?L("~s/", [string:substr(NewDirLevel, PathPrefixLen)]);
         false ->
@@ -833,7 +833,7 @@ walk_release(PathPrefixLen, Tab, FileH, [F|Files], Dir, N) ->
                 " KeyPath='yes' />\n"++lists:duplicate(N+3,32)++
                 "</Component>\n")
     end,
-    walk_release(PathPrefixLen, Tab, FileH, Files, Dir, N).
+    walk_release(PathPrefixLen, FileH, Files, Dir, N).
 
 build_features(Proj, Version, FileH) ->
     ok = file:write(FileH,
