@@ -65,6 +65,7 @@ main([Cmd|CmdParams]) when Cmd=="install";Cmd=="uninstall";Cmd=="start";
         "stop" -> run_port(ErlSrv, ["stop", SrvName]);
         "query" -> run_port(ErlSrv, ["list", SrvName]);
         "console" ->
+            ok = file:set_cwd(RootPath),
             NodeBootScript = filename:join([ReleaseDir, AppVsn, AppName]),
             SysConfig = filename:join([ReleaseDir, AppVsn, "sys.config"]),
             run_port(Werl, ["-boot",        NodeBootScript,
