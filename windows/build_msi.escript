@@ -225,10 +225,17 @@ build_sources() ->
             copy_deep(PathPrfxLen, filename:join([C#config.topDir, "priv"]), Priv);
         Folders ->
             [begin
-                 TargetDir = ?FNJ([Priv, Folder]),                 
-                 ok = file:make_dir(TargetDir),
-                 copy_deep(PathPrfxLen, ?FNJ([C#config.topDir, "priv", Folder]),
-                           TargetDir)
+                 Target = ?FNJ([Priv, Folder]),
+                 Src = ?FNJ([C#config.topDir, "priv", Folder]),
+                 case filelib:is_dir(Src) of
+                    true ->
+                        ok = file:make_dir(Target),
+                        copy_deep(PathPrfxLen, Src, Target);
+                    false ->
+                        {ok, #file_info{mode = Mode}} = file:read_file_info(Src),
+                        {ok, _} = file:copy(Src, Target),
+                        ok = file:change_mode(Target, Mode)
+                end
              end || Folder <- Folders]
     end,
     end_time(copy_src),
