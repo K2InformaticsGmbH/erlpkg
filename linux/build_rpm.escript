@@ -119,7 +119,24 @@ build_sources() ->
 
     Priv = filename:join(RootDir, "priv"),
     ok = file:make_dir(Priv),
-    copy_deep(filename:join([ProjDir, "priv"]), Priv),
+    case C#config.privFolders of
+        "*" ->
+            copy_deep(filename:join([ProjDir, "priv"]), Priv);
+        Folders ->
+            [begin
+                 Target = ?FNJ([Priv, Folder]),
+                 Src = ?FNJ([ProjDir, "priv", Folder]),
+                 case filelib:is_dir(Src) of
+                    true ->
+                        ok = file:make_dir(Target),
+                        copy_deep(Src, Target);
+                    false ->
+                        {ok, #file_info{mode = Mode}} = file:read_file_info(Src),
+                        {ok, _} = file:copy(Src, Target),
+                        ok = file:change_mode(Target, Mode)
+                end
+             end || Folder <- Folders]
+    end,
     
     Deps = filename:join(RootDir, "deps"),
     ok = file:make_dir(Deps),
