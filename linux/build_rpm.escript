@@ -238,7 +238,7 @@ make_spec() ->
     ok = file:write(FileH,
         "\n"
         "%build\n"
-        "./rebar compile\n"
+        "./rebar compile -DRELEASE\n"
         "./rebar generate skip_deps=true\n"),
 
     % Install
