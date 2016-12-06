@@ -467,34 +467,26 @@ create_wxs() ->
     [SysConfigFile] = select([{#item{type=file, name="sys.config", _='_'}, [],
                                ['$_']}]),
     {ok, VmArgsBin} = file:read_file(filename:join(VmArgsFile#item.path, "vm.args")),
-    {ok, SysConfigBin} = file:read_file(filename:join(SysConfigFile#item.path, "sys.config")),
     {match, [Node]} = re:run(VmArgsBin
                              , ".*-name (.*)[\r\n]"
                              , [{capture, [1], list}, ungreedy, dotall]),
     {match, [Cookie]} = re:run(VmArgsBin
                                , ".*-setcookie (.*)[\r\n]"
                                , [{capture, [1], list}, ungreedy, dotall]),
-    {match, [DDErlIntf]} = re:run(SysConfigBin
-                                  , ".*\{interface,[ ]*\"(.*)\"[ ]*}"
-                                  , [{capture, [1], list}, ungreedy, dotall]),
-    {match, [DDErlPort]} = re:run(SysConfigBin
-                                  , ".*\{port,[ ]*([0-9]*)[ ]*}"
-                                  , [{capture, [1], list}, ungreedy, dotall]),
-    {match, [ImemNodeType]} = re:run(SysConfigBin
-                                       , ".*\{mnesia_node_type,[ ]*(disc|ram)[ ]*}"
-                                       , [{capture, [1], list}, ungreedy, dotall]),
-    {match, [ImemSchemaName]} = re:run(SysConfigBin
-                                       , ".*\{mnesia_schema_name,[ ]*'(.*)'[ ]*}"
-                                       , [{capture, [1], list}, ungreedy, dotall]),
-    {match, [ImemClustMgrs]} = re:run(SysConfigBin
-                                      , ".*\{erl_cluster_mgrs,[ ]*(\\[.*)[ ]*}"
-                                      , [{capture, [1], list}, ungreedy, dotall]),
-    {match, [ImemIntf]} = re:run(SysConfigBin
-                                 , ".*\{tcp_ip,[ ]*\"(.*)\"[ ]*}"
-                                 , [{capture, [1], list}, ungreedy, dotall]),
-    {match, [ImemPort]} = re:run(SysConfigBin
-                                 , ".*\{tcp_port,[ ]*([0-9]*)[ ]*}"
-                                 , [{capture, [1], list}, ungreedy, dotall]),
+
+    {ok, [SysConfigs]} = file:consult(filename:join(SysConfigFile#item.path, "sys.config")),
+
+    DDErl = proplists:get_value(dderl, SysConfigs),
+    DDErlIntf = proplists:get_value(interface, DDErl),
+    DDErlPort = integer_to_list(proplists:get_value(port, DDErl)),
+
+    Imem = proplists:get_value(imem, SysConfigs),
+    ImemNodeType = atom_to_list(proplists:get_value(mnesia_node_type, Imem)),
+    ImemSchemaName = atom_to_list(proplists:get_value(mnesia_schema_name, Imem)),
+    ImemClustMgrs = lists:flatten(io_lib:format("~p", [proplists:get_value(erl_cluster_mgrs, Imem)])),
+    ImemIntf = proplists:get_value(tcp_ip, Imem),
+    ImemPort = integer_to_list(proplists:get_value(tcp_port, Imem)),
+    ImemNodeShardFun = proplists:get_value(node_shard_fun, Imem),
 
     ok = file:write(FileH,
         "   <Property Id='NODENAME'>\n"
@@ -529,6 +521,11 @@ create_wxs() ->
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                       Name='DbClusterManagers' Type='raw' />\n"
         "       <![CDATA["++ImemClustMgrs++"]]></Property>\n"
+        "   <Property Id='DBNODESHARDFUN'>\n"
+        "       <RegistrySearch Id='Locate_DBNODESHARDFUN' Root='HKLM'\n"
+        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                       Name='DbNodeShardFunction' Type='raw' />\n"
+        "       <![CDATA["++ImemNodeShardFun++"]]></Property>\n"
         "   <Property Id='DBINTF'>\n"
         "       <RegistrySearch Id='Locate_DBINTF' Root='HKLM'\n"
         "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
@@ -605,6 +602,7 @@ create_wxs() ->
                                       "\"[NODECOOKIE]\" \"[WEBSRVINTF]\" "
                                       "\"[DBNODETYPE]\" \"[DBNODESCHEMANAME]\" "
                                       "\"[DBCLUSTERMGRS]\" \"[DBINTF]\" "
+                                      "\"[DBNODESHARDFUN]\" "
                                       "\"["++BootDir#item.id++"]\\\" "
                                       "\"[PRODUCTDAT]\\\"'\n"
         "                 Execute='commit' Impersonate='no' />\n\n"),
@@ -718,6 +716,10 @@ create_wxs() ->
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='DbInterface' Type='string'\n"
         "                          Value='[DBINTF]' KeyPath='no'/>\n"
+        "           <RegistryValue Root='HKLM'\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
+        "                          Name='DbNodeShardFunction' Type='string'\n"
+        "                          Value='[DBNODESHARDFUN]' KeyPath='no'/>\n"
         % Recursively remove application from path
         "           <util:RemoveFolderEx On='uninstall' Property='INSTALLDIR' />\n"
         "       </Component>\n"
