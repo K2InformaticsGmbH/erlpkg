@@ -30,7 +30,7 @@ main(main) ->
         {error, What} -> error(What);
         {module, common} -> common:main(ScriptPath)
     end,
-    
+
     C0 = get(config),
 
     Candle = case os:find_executable("candle.exe") of
@@ -183,7 +183,7 @@ build_msi() ->
             ok = dets:close(C2#config.tab);
         false -> ok
     end.
-    
+
 uuid() ->
     string:to_upper(re:replace(os:cmd("uuidgen.exe"), "\r\n", "",
                                [{return, list}])).
@@ -248,7 +248,7 @@ build_sources() ->
 
 copy_folder(PathPrefixLen, Src, Target, Folders, Match) ->
     ok = file:make_dir(filename:join([Target|Folders])),
-    SrcFolder = filename:join([Src|Folders]),    
+    SrcFolder = filename:join([Src|Folders]),
     ?L("cp ~s", [string:substr(SrcFolder, PathPrefixLen)]),
     [begin
          Source = filename:join(SrcFolder,F),
@@ -265,7 +265,7 @@ copy_deep(PathPrefixLen, ProjDep, TargetDep) ->
     [case D of
         ".git" -> skip;
         "ebin" -> skip;
-        ".gitignore" -> skip;       
+        ".gitignore" -> skip;
         D ->
              Src = filename:join(ProjDep, D),
              Dst = filename:join(TargetDep, D),
@@ -291,7 +291,7 @@ rebar_generate() ->
     end,
     ?L("Clean Compile and generate..."),
     ?L("--------------------------------------------------------------------------------"),
-    Verbose = get(verbose), 
+    Verbose = get(verbose),
     Rebar = filename:join(C#config.tmpSrcDir,"rebar.bat"),
     common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["clean"], C#config.tmpSrcDir),
     common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["compile"], C#config.tmpSrcDir),
@@ -384,7 +384,7 @@ create_wxs() ->
 
     walk_release(Proj, FileH, filename:absname(C#config.tmpSrcDir)),
     ?L("finished walking OTP release"),
-    
+
     ok = file:write(FileH,
         "         </Directory> <!-- PRODUCT -->\n"
         "       </Directory> <!-- COMPANY -->\n"
@@ -486,7 +486,7 @@ create_wxs() ->
     ImemClustMgrs = lists:flatten(io_lib:format("~p", [proplists:get_value(erl_cluster_mgrs, Imem)])),
     ImemIntf = proplists:get_value(tcp_ip, Imem),
     ImemPort = integer_to_list(proplists:get_value(tcp_port, Imem)),
-    ImemNodeShardFun = proplists:get_value(node_shard_fun, Imem),
+    ImemNodeShardFun = lists:flatten(io_lib:format("~p", [proplists:get_value(node_shard_fun, Imem)])),
 
     ok = file:write(FileH,
         "   <Property Id='NODENAME'>\n"
@@ -757,7 +757,7 @@ create_wxs() ->
 
     ok = file:write(FileH,
         "   <Property Id='ARPPRODUCTICON' Value='application.ico' />"),
-    
+
     ok = file:write(FileH,
         "</Product>\n"
         "</Wix>"),
