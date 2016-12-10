@@ -486,7 +486,10 @@ create_wxs() ->
     ImemClustMgrs = lists:flatten(io_lib:format("~p", [proplists:get_value(erl_cluster_mgrs, Imem)])),
     ImemIntf = proplists:get_value(tcp_ip, Imem),
     ImemPort = integer_to_list(proplists:get_value(tcp_port, Imem)),
-    ImemNodeShardFun = lists:flatten(io_lib:format("~p", [proplists:get_value(node_shard_fun, Imem)])),
+    ImemNodeShardFun0 = lists:flatten(io_lib:format("~p", [proplists:get_value(node_shard_fun, Imem)])),
+    [$"|ImemNodeShardFun1] = ImemNodeShardFun0,
+    [$"|ImemNodeShardFun2] = lists:reverse(ImemNodeShardFun1),
+    ImemNodeShardFun = lists:reverse(ImemNodeShardFun2),
 
     ok = file:write(FileH,
         "   <Property Id='NODENAME'>\n"
