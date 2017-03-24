@@ -5,8 +5,8 @@
 -include("../common.hrl").
 
 main(main) ->
-    ScriptPath = filename:dirname(escript:script_name()),
-    CmnLibMod = filename:join([ScriptPath, "..", "common"]),
+    ScriptPath = filename:dirname(filename:absname(escript:script_name())),
+    CmnLibMod = ?FNJ([ScriptPath, "..", "common"]),
     case {file:read_file_info(CmnLibMod++".erl"),
           file:read_file_info(CmnLibMod++".beam")} of
         {{ok, #file_info{mtime = M1}},
@@ -14,7 +14,7 @@ main(main) ->
 
         _ ->
             case compile:file(CmnLibMod,
-                              [{outdir, filename:join(ScriptPath,"..")},
+                              [{outdir, ?FNJ(ScriptPath,"..")},
                                report]) of
                 {ok, common} -> ?L("common compile");
                 error ->
@@ -45,12 +45,10 @@ main(main) ->
     put(config, C0#config{light = Light, candle = Candle}),
 
     % Copying application specific files
-    [begin
-         common:copy_first_time(F),
-         copy_to_msi(F)
-     end || F <- ["ServiceSetupDlg.wxs", "banner493x58.jpg",
-                  "dialog493x312.jpg", "application.ico", "License.rtf"]],
-    {ok, Config} = file:consult(?FNJ([C0#config.topDir,"rel","files","erlpkg.conf"])),
+    [common:copy_first_time(F) ||
+     F <- ["ServiceSetupDlg.wxs", "banner493x58.jpg", "dialog493x312.jpg",
+           "application.ico", "License.rtf"]],
+    {ok, Config} = file:consult(?FNJ([C0#config.topDir,"erlpkg.conf"])),
     UpgradeCode = case proplists:get_value(upgradecode, Config, '$not_found') of
                   '$not_found' -> '$no_upgrade_code_defined';
                   UpCode -> UpCode
@@ -70,10 +68,8 @@ main(main) ->
     ?L("comment     : ~s", [C#config.pkgComment]),
     ?L("priv dirs   : ~p", [C#config.privFolders]),
     ?L("upgrade     : ~p", [C#config.upgradeCode]),
-    ?L("app root    : ~s", [C#config.topDir]),
-    ?L("tmp src     : ~s", [C#config.tmpSrcDir]),
-    ?L("MSI path    : ~s", [C#config.buildPath]),
-    ?L("rebar       : ~s", [C#config.rebar]),
+    ?L("MSI path    : ~s", [C#config.topDir]),
+    ?L("release     : ~s", [C#config.relDir]),
     ?L("candle.exe  : ~s", [C#config.candle]),
     ?L("light.exe   : ~s", [C#config.light]),
     ?L("--------------------------------------------------------------------------------"),
@@ -85,14 +81,6 @@ main(Opts) when length(Opts) > 0 ->
         true -> put(verbose, true);
         false -> put(verbose, false)
     end,
-    case lists:member("-sb", Opts) of
-        true -> put(skip_build, true);
-        false -> put(skip_build, false)
-    end,
-    case lists:member("-sg", Opts) of
-        true -> put(skip_generate, true);
-        false -> put(skip_generate, false)
-    end,
     case lists:member("-dets", Opts) of
         true -> put(use_dets, true);
         false -> put(use_dets, false)
@@ -100,8 +88,6 @@ main(Opts) when length(Opts) > 0 ->
     main(main);
 main([]) ->
     put(verbose, false),
-    put(skip_build, false),
-    put(skip_generate, false),
     main(main).
 
 start_time(Field) ->
@@ -126,61 +112,34 @@ end_time(Field) ->
         _ -> nop
     end.
 
-copy_to_msi(File) ->
-    C = get(config),
-    case file:copy(?FNJ([C#config.topDir,"rel","files",File]),
-                   ?FNJ([C#config.buildPath,File])) of
-        {error, Error} ->
-            exit({"failed to copy "++File, Error});
-        {ok, _BytesCopied} ->
-            ?L("copied ~s to ~s", [File, C#config.buildPath])
-    end.
-
 build_msi() ->
+    common:gen_patch_ts(),
     C = get(config),
-    case get(skip_build) of
-        false ->
-            build_sources(),
-            ?L("source tree built");
-        _ ->
-            ?L("skipped source tree build")
-    end,
-    ?L("--------------------------------------------------------------------------------"),
-    case get(skip_generate) of
-        false ->
-            rebar_generate(),
-            ?L("OTP release prepared");
-        _ ->
-            common:patch_code_gen(),
-            ?L("skipped rebar generate")
-    end,
-    ?L("--------------------------------------------------------------------------------"),
-    C1 = get(config),
-    ?L("patchCode : ~s", [C1#config.patchCode]),
-    case file:copy(?FNJ([C1#config.topDir,"deps","erlpkg","windows",
-                         "service.escript"]),
-                   ?FNJ([C1#config.tmpSrcDir,"rel",C1#config.app,"bin",
-                         C1#config.app++".escript"])) of
+    ?L("patchCode : ~s", [C#config.patchCode]),
+    case file:copy(?FNJ([C#config.scriptDir,"service.escript"]),
+                   ?FNJ([C#config.relDir,"bin",C#config.app++".escript"])) of
         {error, Error} ->
             exit({"failed to copy service.escript", Error});
         _ -> ok
     end,
     case get(use_dets) of
         true ->
-            C2 = C1#config{tab = C#config.app++"ids"},
-            {ok, _} = dets:open_file(C2#config.tab,
-                                     [{ram_file, true},
-                                      {file, C2#config.app++"ids.dets"}, {keypos, 2}]);
+            C1 = C#config{tab = C#config.app++"ids"},
+            {ok, _} =
+            dets:open_file(
+              C1#config.tab,
+              [{ram_file, true}, {file, C1#config.app++"ids.dets"},
+               {keypos, 2}]);
         false ->
-            C2 = C1#config{tab = list_to_atom(C#config.app)},
-            ets:new(C2#config.tab, [public, named_table, {keypos, 2}])
+            C1 = C#config{tab = list_to_atom(C#config.app)},
+            ets:new(C1#config.tab, [public, named_table, {keypos, 2}])
     end,
-    put(config, C2),
+    put(config, C1),
     create_wxs(),
     candle_light(),
     case get(use_dets) of
         true ->
-            ok = dets:close(C2#config.tab);
+            ok = dets:close(C1#config.tab);
         false -> ok
     end.
 
@@ -188,127 +147,13 @@ uuid() ->
     string:to_upper(re:replace(os:cmd("uuidgen.exe"), "\r\n", "",
                                [{return, list}])).
 
-build_sources() ->
-    start_time(copy_src),
-    C = get(config),
-    ?L("Build Source in ~s", [C#config.tmpSrcDir]),
-    ?L("--------------------------------------------------------------------------------"),
-    ?OSCMD("rm -rf "++C#config.tmpSrcDir),
-    ok = file:make_dir(C#config.tmpSrcDir),
-    [begin
-         Src = ?FNJ(C#config.topDir,F),
-         case filelib:is_file(Src) of
-             true ->
-                 {ok, _} = file:copy(Src, ?FNJ(C#config.tmpSrcDir,F));
-             _ ->
-                 ?L("File ~s not found", [Src])
-         end
-    end || F <- ["rebar.config", "LICENSE", "LICENSE.md", "README",
-                 "README.md", "RELEASE", "RELEASE.md",
-                 "RELEASE-"++string:to_upper(C#config.app)++".md"]],
-    ?OSCMD("cp -L \""++C#config.rebar++"\" \""++C#config.tmpSrcDir++"\""),
-    ?OSCMD("cp -L \""++filename:rootname(C#config.rebar)++"\" \""
-           ++C#config.tmpSrcDir++"\""),
-    ok = file:write_file(filename:join(C#config.tmpSrcDir,"rebar.bat"),
-                         <<"rebar.cmd %*\n">>),
-    PathPrfxLen = length(C#config.topDir)+2,
-    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["include"], "*.*"),
-    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["src"], "*.*"),
-    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["docs"], "*.*"),
-    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["rel"], "*.*"),
-    copy_folder(PathPrfxLen, C#config.topDir, C#config.tmpSrcDir, ["rel", "files"], "*"),
-
-    Priv = filename:join(C#config.tmpSrcDir, "priv"),
-    ok = file:make_dir(Priv),
-    case C#config.privFolders of
-        "*" ->
-            copy_deep(PathPrfxLen, filename:join([C#config.topDir, "priv"]), Priv);
-        Folders ->
-            [begin
-                 Target = ?FNJ([Priv, Folder]),
-                 Src = ?FNJ([C#config.topDir, "priv", Folder]),
-                 case filelib:is_dir(Src) of
-                    true ->
-                        ok = file:make_dir(Target),
-                        copy_deep(PathPrfxLen, Src, Target);
-                    false ->
-                        {ok, #file_info{mode = Mode}} = file:read_file_info(Src),
-                        {ok, _} = file:copy(Src, Target),
-                        ok = file:change_mode(Target, Mode)
-                end
-             end || Folder <- Folders]
-    end,
-    end_time(copy_src),
-
-    start_time(copy_deps),
-    Deps = filename:join(C#config.tmpSrcDir, "deps"),
-    ok = file:make_dir(Deps),
-    copy_deep(PathPrfxLen, filename:join([C#config.topDir, "deps"]), Deps),
-    end_time(copy_deps).
-
-copy_folder(PathPrefixLen, Src, Target, Folders, Match) ->
-    ok = file:make_dir(filename:join([Target|Folders])),
-    SrcFolder = filename:join([Src|Folders]),
-    ?L("cp ~s", [string:substr(SrcFolder, PathPrefixLen)]),
-    [begin
-         Source = filename:join(SrcFolder,F),
-         IsFile = (filelib:is_dir(Source) == false andalso
-                   filename:extension(Source) /= ".swp"),
-         if IsFile ->
-                {ok, _} = file:copy(Source,
-                                    filename:join([Target|Folders]++[F]));
-                true -> ok
-         end
-     end || F <- filelib:wildcard(Match, SrcFolder)].
-
-copy_deep(PathPrefixLen, ProjDep, TargetDep) ->
-    [case D of
-        ".git" -> skip;
-        "ebin" -> skip;
-        ".gitignore" -> skip;
-        D ->
-             Src = filename:join(ProjDep, D),
-             Dst = filename:join(TargetDep, D),
-             case filelib:is_dir(Src) of
-                 true ->
-                     ?L("cp ~s", [string:substr(Src, PathPrefixLen)]),
-                     ok = file:make_dir(Dst),
-                     copy_deep(PathPrefixLen, Src, Dst);
-                 false ->
-                     {ok, #file_info{mode = Mode}} = file:read_file_info(Src),
-                     {ok, _} = file:copy(Src, Dst),
-                     ok = file:change_mode(Dst, Mode)
-             end
-     end
-     || D <- filelib:wildcard("*", ProjDep)].
-
-rebar_generate() ->
-    start_time(rebar_generate),
-    C = get(config),
-    case get(use_dets) of
-        true -> file:delete(C#config.app++"ids.dets");
-        false -> nop
-    end,
-    ?L("Clean Compile and generate..."),
-    ?L("--------------------------------------------------------------------------------"),
-    Verbose = get(verbose),
-    Rebar = filename:join(C#config.tmpSrcDir,"rebar.bat"),
-    common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["clean"], C#config.tmpSrcDir),
-    common:run_port(Rebar, if Verbose -> ["-v"]; true -> [] end ++ ["compile"], C#config.tmpSrcDir),
-    common:patch_code_gen(),
-    common:run_port(Rebar, if Verbose -> ["-v"];
-                              true -> [] end ++ ["generate", "skip_deps=true"],
-                    C#config.tmpSrcDir),
-    end_time(rebar_generate),
-    ?L("--------------------------------------------------------------------------------").
-
 create_wxs() ->
     start_time(create_wxs),
     C = get(config),
     Proj = C#config.app,
     Version = C#config.version,
-    Tab = C#config.tab,
-    WxsFile = filename:join([C#config.buildPath, lists:flatten([Proj,"-",Version,".wxs"])]),
+    _Tab = C#config.tab,
+    WxsFile = filename:join([C#config.topDir, lists:flatten([Proj,"-",Version,".wxs"])]),
     ?L("Create ~s", [WxsFile]),
     ?L("--------------------------------------------------------------------------------"),
     {ok, FileH} = file:open(WxsFile, [write, raw]),
@@ -382,7 +227,7 @@ create_wxs() ->
         "       <Directory Id='"++ID++"' Name='"++C#config.pkgCompany++"'>\n"
         "         <Directory Id='INSTALLDIR' Name='"++C#config.pkgName++"'>\n"),
 
-    walk_release(Proj, FileH, filename:absname(C#config.tmpSrcDir)),
+    walk_release(Proj, FileH, filename:absname(C#config.relDir)),
     ?L("finished walking OTP release"),
 
     ok = file:write(FileH,
@@ -776,7 +621,7 @@ candle_light() ->
     Verbose = get(verbose),
     C = get(config),
     {ok, CurDir} = file:get_cwd(),
-    ok = file:set_cwd(C#config.buildPath),
+    ok = file:set_cwd(C#config.topDir),
     Wxses = filelib:wildcard("*.wxs"),
     ?L("candle with ~p", [Wxses]),
     common:run_port(C#config.candle, if Verbose -> ["-v"]; true -> [] end
@@ -810,12 +655,11 @@ generate_msi_name() ->
                    C#config.version,".", C#config.patchCode,"_",
                    MsiDate,".msi"]).
 
-walk_release(Proj, FileH, Root) ->
+walk_release(Proj, FileH, ReleaseRoot) ->
     C = get(config),
-    ReleaseRoot = filename:join([Root,"rel",Proj]),
     case filelib:is_dir(ReleaseRoot) of
         true ->
-            walk_release(length(C#config.tmpSrcDir)+2, FileH,
+            walk_release(length(C#config.relDir)+2, FileH,
                          filelib:wildcard("*", ReleaseRoot), ReleaseRoot, 12);
         false -> ?L("~p is not a directory", [ReleaseRoot])
     end.
