@@ -185,8 +185,9 @@ build_msi() ->
     end.
 
 uuid() ->
-    string:to_upper(re:replace(os:cmd("uuidgen.exe"), "\r\n", "",
-                               [{return, list}])).
+    <<U0:32, U1:16, _:4, U2:12, _:2, U3:30, U4:32>> = crypto:strong_rand_bytes(16),
+    <<X0:32, X1:16, X2:16, X3:16, X4:48>> = <<U0:32, U1:16, 4:4, U2:12, 2#10:2, U3:30, U4:32>>,
+    string:to_upper(lists:flatten(io_lib:format("~8.16.0b-~4.16.0b-~4.16.0b-~4.16.0b-~12.16.0b", [X0, X1, X2, X3, X4]))).
 
 build_sources() ->
     start_time(copy_src),
