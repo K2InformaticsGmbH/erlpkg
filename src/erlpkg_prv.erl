@@ -1,4 +1,5 @@
 -module(erlpkg_prv).
+-include("erlpkg.hrl").
 
 -export([init/1, do/1, format_error/1]).
 
@@ -15,8 +16,13 @@ init(State) ->
             {module, ?MODULE},            % The module implementation of the task
             {bare, true},                 % The task can be run by the user, always true
             {deps, ?DEPS},                % The list of dependencies
-            {example, "rebar3 erlpkg"}, % How to use the plugin
-            {opts, []},                   % list of options understood by the plugin
+            % How to use the plugin
+            {example, "rebar3 erlpkg args"},
+            % list of options understood by the plugin
+            {opts,
+             [{company,     $c, "company",      string, "Name of the company"},
+              {upgradecode, $u, "upgradecode",  string, "UUID of the product"}
+             ]},
             {short_desc, "MSI and RPM builder"},
             {desc, "Windows MSI and Linux RPM installer packager for erlang"}
     ]),
@@ -25,7 +31,49 @@ init(State) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
-    io:format("project_apps ~p~n", [rebar_state:project_apps(State)]),
+    [OTP_VSN, SYSTEM_ARCH, WORDSIZE] =
+    case re:run(rebar_api:get_arch(), "^([0-9\.]+)-(.*)-([0-9]+)$",
+                [{capture, [1,2,3], list}]) of
+        {match, [O, S, W]} -> [O, S, W];
+        Other -> rebar_api:abort("{~p,~p} rebar_api:get_arch() : ~p",
+                                 [?MODULE, ?LINE, Other])
+    end,
+    case SYSTEM_ARCH of
+        "win32" ->
+            case {os:find_executable("candle.exe"),
+                  os:find_executable("light.exe")} of
+                {C, L} when C == false; L == false ->
+                    rebar_api:abort("{~p,~p} candle.exe/light.exe not found "
+                                    "make sure http://wixtoolset.org/ is installed and in path",
+                                    [?MODULE, ?LINE]);
+                _ -> ok
+            end;
+        _ ->
+            rebar_api:abort("unsupported ~p", [SYSTEM_ARCH])
+    end,
+    {ok, RootDir} = file:get_cwd(),
+    Profile =
+    case rebar_state:current_profiles(State) of
+        [default, P] -> P;
+        Other1 -> rebar_api:abort("{~p,~p} bad profiles : ~p",
+                                  [?MODULE, ?LINE, Other1])
+    end,
+    ReleaseDir = filename:join([RootDir, "_build", Profile, "rel"]),
+    Args = rebar_state:command_parsed_args(State),
+    [AppInfo] = rebar_state:project_apps(State),
+    AppName = binary_to_list(rebar_app_info:name(AppInfo)),
+    Version = rebar_app_info:original_vsn(AppInfo),
+    Description = proplists:get_value(
+                    description, rebar_app_info:app_details(AppInfo), ""),
+    ?D("OTP ~p, ARCH ~p, WORD ~p profile ~p~nRoot ~p~nReleaseDir ~p~nArgs ~p"
+       "~nApp ~p~nAppVsn ~p~nDetails ~p",
+       [OTP_VSN, SYSTEM_ARCH, WORDSIZE, Profile, RootDir, ReleaseDir, Args,
+        AppName, Version, Description]),
+    ?C("rebar_api:console()", []),
+    ?I("rebar_api:info()", []),
+    ?W("rebar_api:warn()", []),
+    ?E("rebar_api:error()", []),
+    ?D("debug", []),
     {ok, State}.
 
 -spec format_error(any()) ->  iolist().
