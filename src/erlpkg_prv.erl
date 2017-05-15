@@ -59,15 +59,20 @@ do(State) ->
                                   [?MODULE, ?LINE, Other1])
     end,
     ReleaseDir = filename:join([RootDir, "_build", Profile, "rel"]),
-    Args = rebar_state:command_parsed_args(State),
+    {Args,_} = rebar_state:command_parsed_args(State),
+    if length(Args) == 0 ->
+           rebar_api:abort("missing arguments");
+       true ->
+           ?D("Args ~p", [Args])
+    end,
     [AppInfo] = rebar_state:project_apps(State),
     AppName = binary_to_list(rebar_app_info:name(AppInfo)),
     Version = rebar_app_info:original_vsn(AppInfo),
     Description = proplists:get_value(
                     description, rebar_app_info:app_details(AppInfo), ""),
-    ?D("OTP ~p, ARCH ~p, WORD ~p profile ~p~nRoot ~p~nReleaseDir ~p~nArgs ~p"
+    ?D("OTP ~p, ARCH ~p, WORD ~p profile ~p~nRoot ~p~nReleaseDir ~p"
        "~nApp ~p~nAppVsn ~p~nDetails ~p",
-       [OTP_VSN, SYSTEM_ARCH, WORDSIZE, Profile, RootDir, ReleaseDir, Args,
+       [OTP_VSN, SYSTEM_ARCH, WORDSIZE, Profile, RootDir, ReleaseDir,
         AppName, Version, Description]),
     ?C("rebar_api:console()", []),
     ?I("rebar_api:info()", []),
