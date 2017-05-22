@@ -1,15 +1,9 @@
 -module(windows).
 -include("erlpkg.hrl").
 
--export([build_msi/1]).
+-export([init_msi/1, create_wxs/1]).
 
-
-%-record(config, {otp, arch, word, app, desc, version, topDir, pkgDir,
-%                 pkgName, pkgCompany, pkgComment, privFolders, candle,
-%                 light, upgradeCode, patchCode, tab, stats, scriptDir,
-%                 projDir, relDir, appRelDir}).
-
-build_msi(#{} = C0) ->
+init_msi(#{} = C0) ->
     C1 = C0#{candle => os:find_executable("candle.exe"),
              light => os:find_executable("light.exe")},
     case C1 of
@@ -28,47 +22,41 @@ build_msi(#{} = C0) ->
     %end,
     C2 = C1#{tab => list_to_atom(maps:get(app, C1))},
     ets:new(maps:get(tab, C2), [public, named_table, {keypos, 2}]),
-    %C3 = create_wxs(C2),
-    %C4 = candle_light(C3).
-    ok.
+    C2.
 
--ifdef(FINISHED).
-
-
-create_wxs() ->
-    start_time(create_wxs),
-    C = get(config),
-    Proj = C#config.app,
-    Version = C#config.version,
-    _Tab = C#config.tab,
-    WxsFile = filename:join([C#config.topDir, lists:flatten([Proj,"-",Version,".wxs"])]),
+create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
+             company := Company, upgradecode := UpgradeCode, desc := Comment} = C) ->
+    C1 = start_time(C, create_wxs),
+    ensure_path(PkgDir),
+    WxsFile = filename:join([PkgDir, lists:flatten([Proj,"-",Version,".wxs"])]),
     ?I("Create ~s", [WxsFile]),
     ?I("--------------------------------------------------------------------------------"),
     {ok, FileH} = file:open(WxsFile, [write, raw]),
+    C2 = C1#{wxsFileH => FileH},
 
-    {ok, PRODUCT_GUID} = get_id(undefined, 'PRODUCT_GUID', undefined),
-    {ok, UPGRADE_GUID} = case C#config.upgradeCode of
+    {ok, PRODUCT_GUID} = get_id(C, undefined, 'PRODUCT_GUID', undefined),
+    {ok, UPGRADE_GUID} = case UpgradeCode of
                              '$no_upgrade_code_defined' ->
-                                 get_id(undefined, 'UPGRADE_GUID', undefined);
-                             UpCode -> {ok, UpCode}
+                                 get_id(C, undefined, 'UPGRADE_GUID', undefined);
+                             UpgradeCode -> {ok, UpgradeCode}
                          end,
-    {ok, ID} = get_id(undefined, C#config.pkgCompany, undefined),
+    {ok, ID} = get_id(C, undefined, Company, undefined),
     ok = file:write(FileH,
         "<?xml version='1.0' encoding='windows-1252'?>\n"
-        "<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'"
+        "<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'\n"
         "     xmlns:util='http://schemas.microsoft.com/wix/UtilExtension'>\n\n"
 
-        "<Product Name='"++C#config.pkgName++"'\n"
+        "<Product Name='"++Proj++"'\n"
         "         Id='"++PRODUCT_GUID++"'\n"
         "         UpgradeCode='"++UPGRADE_GUID++"'\n"
         "         Language='1033' Codepage='1252' Version='"++Version++"'\n"
-        "         Manufacturer='"++C#config.pkgCompany++"'>\n\n"
+        "         Manufacturer='"++Company++"'>\n\n"
 
         "   <Package Id='*'\n"
         "            Keywords='Installer'\n"
-        "            Description=\""++C#config.pkgCompany++"\"\n"
-        "            Comments='"++C#config.pkgComment++"'\n"
-        "            Manufacturer='"++C#config.pkgCompany++"'\n"
+        "            Description=\""++Company++"\"\n"
+        "            Comments='"++Comment++"'\n"
+        "            Manufacturer='"++Company++"'\n"
         "            InstallerVersion='200' Languages='1033'\n"
         "            Compressed='yes'\n"
         "            InstallScope='perMachine'\n"
@@ -81,7 +69,7 @@ create_wxs() ->
         "   <Media Id='1' Cabinet='"++Proj++".cab' EmbedCab='yes'\n"
         "          DiskPrompt='CD-ROM #1'/>\n"
         "   <Property Id='DiskPrompt'\n"
-        "             Value=\""++C#config.pkgCompany++" "++Proj++" Installation [1]\"/>\n\n"),
+        "             Value=\""++Company++" "++Proj++" Installation [1]\"/>\n\n"),
 
     ?I("wxs header sections created"),
 
@@ -89,17 +77,17 @@ create_wxs() ->
         "   <Directory Id='TARGETDIR' Name='SourceDir'>\n"),
 
     % AppData PATH
-    {CoDatId, CoDatGuId} = get_id(component, 'COMPANYDAT_GUID', undefined),
-    {AppDatId, AppDatGuId} = get_id(component, 'PRODUCTDAT_GUID', undefined),
+    {CoDatId, CoDatGuId} = get_id(C, component, 'COMPANYDAT_GUID', undefined),
+    {AppDatId, AppDatGuId} = get_id(C, component, 'PRODUCTDAT_GUID', undefined),
     ok = file:write(FileH,
         "     <Directory Id='CommonAppDataFolder' Name='CommonAppData'>\n"
-        "       <Directory Id='COMPANYDAT' Name='"++C#config.pkgCompany++"'>\n"
+        "       <Directory Id='COMPANYDAT' Name='"++Company++"'>\n"
         "         <Component Id='"++CoDatId++"' Guid='"++CoDatGuId++"'>\n"
         "           <CreateFolder Directory='COMPANYDAT'>\n"
         "             <Permission User='Everyone' GenericAll='yes' />\n"
         "           </CreateFolder>\n"
         "         </Component>\n"
-        "         <Directory Id='PRODUCTDAT' Name='"++C#config.pkgName++"'>\n"
+        "         <Directory Id='PRODUCTDAT' Name='"++Proj++"'>\n"
         "           <Component Id='"++AppDatId++"' Guid='"++AppDatGuId++"'>\n"
         "             <CreateFolder Directory='PRODUCTDAT'>\n"
         "               <Permission User='Everyone' GenericAll='yes' />\n"
@@ -112,10 +100,10 @@ create_wxs() ->
     % ProgramFiles PATH
     ok = file:write(FileH,
         "     <Directory Id='ProgramFiles64Folder' Name='PFiles'>\n"
-        "       <Directory Id='"++ID++"' Name='"++C#config.pkgCompany++"'>\n"
-        "         <Directory Id='INSTALLDIR' Name='"++C#config.pkgName++"'>\n"),
+        "       <Directory Id='"++ID++"' Name='"++Company++"'>\n"
+        "         <Directory Id='INSTALLDIR' Name='"++Proj++"'>\n"),
 
-    walk_release(Proj, FileH, filename:absname(C#config.relDir)),
+    walk_release(C2),
     ?I("finished walking OTP release"),
 
     ok = file:write(FileH,
@@ -123,35 +111,35 @@ create_wxs() ->
         "       </Directory> <!-- COMPANY -->\n"
         "     </Directory> <!-- ProgramFiles64Folder -->\n"),
 
-    ?L("finished ProgramFiles64Folder section"),
+    ?I("finished ProgramFiles64Folder section"),
 
     % Property references
-    [BootDir] = select([{#item{type=dir, name=Version, _='_'}, [], ['$_']}]),
-    [EscriptExe] = select([{#item{type=component, name="escript.exe",_='_'},
+    [BootDir] = select(C, [{#item{type=dir, name=Version, _='_'}, [], ['$_']}]),
+    [EscriptExe] = select(C, [{#item{type=component, name="escript.exe",_='_'},
                             [], ['$_']}]),
-    [EscriptExeFile] = select([{#item{type=file, name="escript.exe",
+    [EscriptExeFile] = select(C, [{#item{type=file, name="escript.exe",
                                       guid=undefined, _='_'}, [], ['$_']}]),
-    [EditConfEs] = select([{#item{type=component, name="editconfs.escript",
+    [EditConfEs] = select(C, [{#item{type=component, name="editconfs.escript",
                                   _='_'}, [], ['$_']}]),
-    [SrvcCtrlEs] = select([{#item{type=component, name=Proj++".escript",
+    [SrvcCtrlEs] = select(C, [{#item{type=component, name=Proj++".escript",
                                   _='_'}, [], ['$_']}]),
-    [SrvcCtrlEsFile] = select([{#item{type=file, name=Proj++".escript",
+    [SrvcCtrlEsFile] = select(C, [{#item{type=file, name=Proj++".escript",
                                       guid=undefined, _='_'}, [], ['$_']}]),
 
-    {ProgFolderId, ProgFolderGuId} = get_id(component, 'PROGSMENUFOLDER_GUID', undefined),
-    {DsktpShortId, DsktpShortGuId} = get_id(component, 'DESKTOPSHORTCUT_GUID', undefined),
+    {ProgFolderId, ProgFolderGuId} = get_id(C, component, 'PROGSMENUFOLDER_GUID', undefined),
+    {DsktpShortId, DsktpShortGuId} = get_id(C, component, 'DESKTOPSHORTCUT_GUID', undefined),
 
     ok = file:write(FileH,
         "     <Directory Id='ProgramMenuFolder' Name='Programs'>\n"
         "        <Directory Id='ApplicationProgramMenuFolder'\n"
-        "                   Name='"++C#config.pkgName++"' />\n"
+        "                   Name='"++Proj++"' />\n"
         "     </Directory> <!-- ProgramMenuFolder -->\n\n"),
 
     ?I("finished ProgramMenuFolder section"),
 
     ok = file:write(FileH,
         "     <Directory Id='DesktopFolder' Name='Desktop'>\n"
-        "       <Directory Id='ApplicationDesktopFolder' Name='"++C#config.pkgName++"'/>\n"
+        "       <Directory Id='ApplicationDesktopFolder' Name='"++Proj++"'/>\n"
         "     </Directory> <!-- DesktopFolder -->\n\n"),
 
     ?I("finished DesktopFolder section"),
@@ -161,7 +149,7 @@ create_wxs() ->
 
     ?I("finished TARGETDIR section"),
 
-    build_features(Proj, Version, FileH),
+    %build_features(Proj, Version, FileH),
 
     ?I("feature sections created"),
 
@@ -195,11 +183,11 @@ create_wxs() ->
 
     ?I("added custom setup dialog"),
 
-    [VmArgsFile] = select([{#item{type=file, name="vm.args", _='_'}, [],
+    [VmArgsFile] = select(C, [{#item{type=file, name="vm.args", _='_'}, [],
                             ['$_']}]),
-    [SysConfigFile] = select([{#item{type=file, name="sys.config", _='_'}, [],
+    [SysConfigFile] = select(C, [{#item{type=file, name="sys.config", _='_'}, [],
                                ['$_']}]),
-    {ok, VmArgsBin} = file:read_file(filename:join(VmArgsFile#item.path, "vm.args")),
+    {ok, VmArgsBin} = file:read_file(?FNJ(VmArgsFile#item.path, "vm.args")),
     {match, [Node]} = re:run(VmArgsBin
                              , ".*-name (.*)[\r\n]"
                              , [{capture, [1], list}, ungreedy, dotall]),
@@ -207,7 +195,7 @@ create_wxs() ->
                                , ".*-setcookie (.*)[\r\n]"
                                , [{capture, [1], list}, ungreedy, dotall]),
 
-    {ok, [SysConfigs]} = file:consult(filename:join(SysConfigFile#item.path, "sys.config")),
+    {ok, [SysConfigs]} = file:consult(?FNJ(SysConfigFile#item.path, "sys.config")),
 
     DDErl = proplists:get_value(dderl, SysConfigs),
     DDErlIntf = proplists:get_value(interface, DDErl),
@@ -284,42 +272,36 @@ create_wxs() ->
     SrvcCtrlEsPath = filename:split(SrvcCtrlEs#item.path),
     ExecCommand = "\"[INSTALLDIR]"
                   ++ string:join(
-                       lists:sublist(EscriptExePath
-                                     , length(EscriptExePath)-1, 2)
+                       lists:sublist(EscriptExePath, length(EscriptExePath)-1, 2)
                        ++ ["escript.exe"]
                        , "\\")
                   ++ "\" \"[INSTALLDIR]"
                   ++ string:join(
-                       lists:sublist(EditConfEsPath
-                                     , length(EditConfEsPath), 1)
+                       lists:sublist(EditConfEsPath, length(EditConfEsPath), 1)
                        ++ ["editconfs.escript"]
                        , "\\")
                   ++ "\"",
 
     SrvcCommand = "\"[INSTALLDIR]"
                   ++ string:join(
-                       lists:sublist(EscriptExePath
-                                     , length(EscriptExePath)-1, 2)
+                       lists:sublist(EscriptExePath, length(EscriptExePath)-1, 2)
                        ++ ["escript.exe"]
                        , "\\")
                   ++ "\" \"[INSTALLDIR]"
                   ++ string:join(
-                       lists:sublist(SrvcCtrlEsPath
-                                     , length(SrvcCtrlEsPath), 1)
+                       lists:sublist(SrvcCtrlEsPath, length(SrvcCtrlEsPath), 1)
                        ++ [Proj++".escript"]
                        , "\\")
                   ++ "\"",
 
     InsldSrvcCmd = "\"[INSTALLDIR]"
                   ++ string:join(
-                       lists:sublist(EscriptExePath
-                                     , length(EscriptExePath)-1, 2)
+                       lists:sublist(EscriptExePath, length(EscriptExePath)-1, 2)
                        ++ ["escript.exe"]
                        , "\\")
                   ++ "\" \"[INSTALLDIR]"
                   ++ string:join(
-                       lists:sublist(SrvcCtrlEsPath
-                                     , length(SrvcCtrlEsPath), 1)
+                       lists:sublist(SrvcCtrlEsPath, length(SrvcCtrlEsPath), 1)
                        ++ [Proj++".escript"]
                        , "\\")
                   ++ "\"",
@@ -349,11 +331,11 @@ create_wxs() ->
     %  must run after InstallFiles step is 'comitted'
     ok = file:write(FileH,
         "   <CustomAction Id='InstallService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" install \""++C#config.pkgName++"\""
-                          " \""++C#config.desc++"\"'\n"
+        "                 ExeCommand='"++SrvcCommand++" install \""++Proj++"\""
+                          " \""++Comment++"\"'\n"
         "                 Execute='commit' Impersonate='no' />\n"
         "   <CustomAction Id='StartService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" start \""++C#config.pkgName++"\"'\n"
+        "                 ExeCommand='"++SrvcCommand++" start \""++Proj++"\"'\n"
         "                 Execute='commit' Impersonate='no' />\n"
     % Custom actions service stop and uninstall
     %  must run immediately and before InstallValidate step to ensure that
@@ -361,10 +343,10 @@ create_wxs() ->
     %  uninstalling process detecets and warns
     %  Execute='deferred' is MUST to enforce immediate elivated execution
         "   <CustomAction Id='UnInstallService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++InsldSrvcCmd++" uninstall \""++C#config.pkgName++"\"'\n"
+        "                 ExeCommand='"++InsldSrvcCmd++" uninstall \""++Proj++"\"'\n"
         "                 Execute='deferred' Impersonate='no' />\n"
         "   <CustomAction Id='StopService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++InsldSrvcCmd++" stop \""++C#config.pkgName++"\"'\n"
+        "                 ExeCommand='"++InsldSrvcCmd++" stop \""++Proj++"\"'\n"
         "                 Execute='deferred' Impersonate='no' />\n\n"),
 
     ?I("added service control custom actions"),
@@ -402,13 +384,13 @@ create_wxs() ->
         "   <DirectoryRef Id='ApplicationProgramMenuFolder'>\n"
         "       <Component Id='"++ProgFolderId++"' Guid='"++ProgFolderGuId++"'>\n"
         "           <Shortcut Id='programattach'\n"
-        "                     Name='"++C#config.pkgName++" Attach'\n"
+        "                     Name='"++Proj++" Attach'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <Shortcut Id='programgui'\n"
-        "                     Name='"++C#config.pkgName++" GUI'\n"
+        "                     Name='"++Proj++" GUI'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
@@ -467,13 +449,13 @@ create_wxs() ->
         "   <DirectoryRef Id='ApplicationDesktopFolder'>\n"
         "       <Component Id='"++DsktpShortId++"' Guid='"++DsktpShortGuId++"'>\n"
         "           <Shortcut Id='desktopattach'\n"
-        "                     Name='"++C#config.pkgName++" Attach'\n"
+        "                     Name='"++Proj++" Attach'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <Shortcut Id='desktopgui'\n"
-        "                     Name='"++C#config.pkgName++" GUI'\n"
+        "                     Name='"++Proj++" GUI'\n"
         "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
         "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
@@ -501,8 +483,194 @@ create_wxs() ->
     ?I("finised building wxs"),
 
     ok = file:close(FileH),
-    end_time(create_wxs),
-    ?I("--------------------------------------------------------------------------------").
+    C1 = end_time(C, create_wxs),
+    ?I("--------------------------------------------------------------------------------"),
+    C1.
+
+ensure_path(Path) ->
+    case filelib:is_dir(Path) of
+        false ->
+            case file:make_dir(Path) of
+                {error, enoent} ->
+                    [_|Rest] = lists:reverse(filename:split(Path)),
+                    ensure_path(filename:join(lists:reverse(Rest))),
+                    ensure_path(Path);
+                {error, Error} -> ?ABORT("failed to create ~p : ~p",
+                                         [Path, Error]);
+                ok -> ok
+            end;
+        true -> ok
+    end.
+
+start_time(C, Field) ->
+    C#{stats => (maps:get(stats, C, #{}))#{Field => os:timestamp()}}.
+
+end_time(C, Field) ->
+    case C of %maps:get(Field, maps:get(stats, C, #{}), '$not_defined') of
+        #{stats := #{Field := Start} = Stats} ->
+            C#{stats => Stats#{stats => timer:now_diff(os:timestamp(), Start)}};
+        C -> ?W("Stat ~p is not defined", [Field])
+    end.
+
+get_id(C, undefined, Field, undefined) when is_list(Field) ->
+    Id = "id_"++?H(Field),
+    case lookup(C, Id) of
+        [] ->
+            Item = #item{id = Id, name = Field},
+            insert(C, Item),
+            {ok, Item#item.id};
+        [#item{} = Item] ->
+            {ok, Item#item.id}
+    end;
+get_id(C, Type, Field, undefined) when is_atom(Field) ->
+    Id = "id_"++?H(Field),
+    case lookup(C, Id) of
+        [] ->
+            Item = #item{id = Id, name = Field, guid = uuid()},
+            case Type of
+                component ->
+                    insert(C, Item#item{type=component}),
+                    {Item#item.id, Item#item.guid};
+                _ ->
+                    insert(C, Item),
+                    {ok, Item#item.guid}
+            end;
+        [#item{} = Item] ->
+            case Type of
+                component -> {Item#item.id, Item#item.guid};
+                _ -> {ok, Item#item.guid}
+            end
+    end;
+get_id(C, Type, F, Dir)
+  when Type =:= component;
+       Type =:= file;
+       Type =:= dir ->
+    Id = "id_"++?H({Type, ?FNJ([Dir, F])}),
+    {ok, FI} = file:read_file_info(?FNJ([Dir, F])),
+    case lookup(C, Id) of
+        [] ->
+            Item = #item{id = Id
+                         , type = Type
+                         , guid = if Type =:= component -> uuid();
+                                     true -> undefined end
+                         , name = F
+                         , path = Dir
+                         , file_info = FI
+                        },
+            insert(C, Item),
+            case Type of
+                component -> {Item#item.id, Item#item.guid};
+                file -> {ok, Item#item.id};
+                dir -> {ok, Item#item.id}
+            end;
+        [#item{name = F, path = Dir, file_info = FI} = Item] ->
+            case Type of
+                component -> {Item#item.id, Item#item.guid};
+                file -> {ok, Item#item.id};
+                dir -> {ok, Item#item.id}
+            end;
+        [#item{name = F, path = Dir} = I] ->
+            Item = I#item{guid = if Type =:= component -> uuid();
+                                    true -> undefined end
+                          , file_info = FI},
+            insert(C, Item),
+            case Type of
+                component -> {Item#item.id, Item#item.guid};
+                file -> {ok, Item#item.id};
+                dir -> {ok, Item#item.id}
+            end;
+        Items ->
+            ?ABORT("CLASH ~p with ~p", [{Type, F, Dir, Id}, Items])
+    end.
+
+select(#{tab := Tab}, MatchSpec) -> ets:select(Tab, MatchSpec).
+insert(#{tab := Tab}, Item) -> true = ets:insert(Tab, Item).
+lookup(#{tab := Tab}, Id) -> ets:lookup(Tab, Id).
+foreach(#{tab := Tab}, Fun) when is_function(Fun, 1) ->
+    ets:foldl(fun(Row, '$unused') ->
+                      Fun(Row),
+                      '$unused'
+              end, '$unused', Tab).
+
+uuid() ->
+    <<U0:32, U1:16, _:4, U2:12, _:2, U3:30, U4:32>> =
+    crypto:strong_rand_bytes(16),
+    <<X0:32, X1:16, X2:16, X3:16, X4:48>> =
+    <<U0:32, U1:16, 4:4, U2:12, 2#10:2, U3:30, U4:32>>,
+    string:to_upper(
+      lists:flatten(
+        io_lib:format("~8.16.0b-~4.16.0b-~4.16.0b-~4.16.0b-~12.16.0b",
+                      [X0, X1, X2, X3, X4]))).
+
+walk_release(#{relAppDir := ReleaseRoot} = C) ->
+    case filelib:is_dir(ReleaseRoot) of
+        true ->
+            walk_release(
+              C, length(ReleaseRoot)+2, filelib:wildcard("*", ReleaseRoot),
+              ReleaseRoot, 12),
+            ?D("");
+        false -> ?ABORT("~p is not a directory", [ReleaseRoot])
+    end.
+
+walk_release(C, PathPrefixLen, Files, Dir, N) ->
+    collect(
+      C, Dir,
+      lists:map(
+           fun(F) ->
+                   Self = self(),
+                   spawn(fun() ->
+                                 walk_release(Self, C, F, PathPrefixLen, Files, Dir, N)
+                         end)
+           end, Files)).
+walk_release(Self, C, F, PathPrefixLen, Files, Dir, N) ->
+    ProcessPath = ?FNJ([Dir,F]),
+    case filelib:is_dir(ProcessPath) of
+        true ->
+?D(">>>ProcessPath>>> ~s", [ProcessPath]),
+            FilesAtThisLevel = filelib:wildcard("*", ProcessPath),
+?D(">>>FilesAtThisLevel>>> ~p", [FilesAtThisLevel]),
+            {ok, DirId} = get_id(C, dir, F, Dir),
+            ?D("~s/", [string:substr(ProcessPath, PathPrefixLen)]),
+            Self ! {self(),
+                    [lists:duplicate(N,32), "<Directory Id='", DirId, "' Name='", F, "'>\n",
+                     walk_release(C, PathPrefixLen, FilesAtThisLevel, ProcessPath, N+3),
+                     lists:duplicate(N,32), "</Directory>\n"]};
+        false ->
+            FilePath = get_filepath(Dir, F),
+            {Id, GuID} = get_id(C, component, F, Dir),
+            {ok, FileId} = get_id(C, file, F, Dir),
+            Self ! {self(),
+                    [lists:duplicate(N+3,32),
+                     "<Component Id='",Id,"' Guid='",GuID,"'>\n",lists:duplicate(N+3,32),
+                     "   <File Id='",FileId,"' Name='",F,
+                     "' DiskId='1' Source='",FilePath,"'"
+                     " KeyPath='yes' />\n",lists:duplicate(N+3,32),
+                     "</Component>\n"]}
+    end.
+
+
+collect(C, Dir, Pids) ->
+    collect(C, Dir, length(Pids), Pids, []).
+collect(#{wxsFileH := FileH}, _Dir, PidCount, [], Acc) ->
+    ok = file:write(FileH, lists:flatten(Acc));
+collect(C, Dir, PidCount, Pids, Acc) ->
+    receive
+        {P,S} ->
+%            ?D("~p/~p to process in ~p", [length(Pids) - 1, PidCount, Dir]),
+            collect(C, Dir, PidCount, Pids -- [P], [S|Acc])
+    end.
+
+get_filepath(Dir, F) ->
+    FilePathNoRel =
+        lists:foldl(
+          fun
+              ("..", Acc) -> Acc;
+              (P,Acc) -> Acc ++ [P]
+          end,
+          [], filename:split(Dir)),
+    ?FNJ([".." | FilePathNoRel]++[F]).
+
+-ifdef(FINISHED).
 
 candle_light() ->
     start_time(candle_light),
@@ -523,28 +691,6 @@ candle_light() ->
                  "-out", MsiFile | WixObjs]),
     ok = file:set_cwd(CurDir),
     end_time(candle_light).
-
-start_time(Field) ->
-    Start = os:timestamp(),
-    Fun = fun() ->
-                  C = get(config),
-                  put(config,
-                      C#config{
-                        stats = maps:put(Field,
-                                         timer:now_diff(os:timestamp(), Start),
-                                         C#config.stats)
-                       })
-          end,
-    C = get(config),
-    put(config, C#config{stats = maps:put(Field, Fun, C#config.stats)}).
-
-end_time(Field) ->
-    C = get(config),
-    case maps:get(Field, C#config.stats, '$not_defined') of
-        '$not_defined' -> ?L("Stat ~p is not defined", [Field]);
-        V when is_function(V,0) -> V();
-        _ -> nop
-    end.
 
 
 run_port(Cmd, Args) ->
@@ -615,16 +761,6 @@ timestamp() ->
                   [Day,Month,Year,Hour,Minute,Second,
                    string:left(integer_to_list(Micro), 3, $0)]).
 
-get_filepath(Dir, F) ->
-    FilePathNoRel =
-        lists:foldl(
-          fun
-              ("..", Acc) -> Acc;
-              (P,Acc) -> Acc ++ [P]
-          end,
-          [], filename:split(Dir)),
-    filename:join([".." | FilePathNoRel]++[F]).
-
 generate_msi_name() ->
     C = get(config),
     {{Y,M,D},{H,Mn,S}} = calendar:local_time(),
@@ -634,58 +770,6 @@ generate_msi_name() ->
                    C#config.version,".", C#config.patchCode,"_",
                    MsiDate,".msi"]).
 
-walk_release(Proj, FileH, ReleaseRoot) ->
-    C = get(config),
-    case filelib:is_dir(ReleaseRoot) of
-        true ->
-            walk_release(length(C#config.relDir)+2, FileH,
-                         filelib:wildcard("*", ReleaseRoot), ReleaseRoot, 12);
-        false -> ?L("~p is not a directory", [ReleaseRoot])
-    end.
-
-walk_release(PathPrefixLen, FileH, Files, Dir, N) ->
-    ok = file:write(FileH, lists:flatten(walk_release(PathPrefixLen, Files, Dir, N))).
-walk_release(PathPrefixLen, Files, Dir, N) ->
-    Pids = lists:map(
-      fun(F) ->
-              Self = self(),
-              Conf = get(config),
-              UseDets = get(use_dets),
-              spawn(
-                fun() ->
-                        put(config, Conf),
-                        put(use_dets, UseDets),
-                        case filelib:is_dir(filename:join([Dir,F])) of
-                            true ->
-                                NewDirLevel = filename:join([Dir,F]),
-                                FilesAtThisLevel = filelib:wildcard("*", NewDirLevel),
-                                {ok, DirId} = get_id(dir, F, Dir),
-                                ?L("~s/", [string:substr(NewDirLevel, PathPrefixLen)]),
-                                Self ! {self(),
-                                        [lists:duplicate(N,32), "<Directory Id='", DirId, "' Name='", F, "'>\n",
-                                         walk_release(PathPrefixLen, FilesAtThisLevel, NewDirLevel, N+3),
-                                         lists:duplicate(N,32), "</Directory>\n"]};
-                            false ->
-                                FilePath = get_filepath(Dir, F),
-                                {Id, GuID} = get_id(component, F, Dir),
-                                {ok, FileId} = get_id(file, F, Dir),
-                                Self ! {self(),
-                                        [lists:duplicate(N+3,32),"<Component Id='",Id,"' Guid='",GuID,"'>\n",lists:duplicate(N+3,32),
-                                         "   <File Id='",FileId,"' Name='",F,
-                                         "' DiskId='1' Source='",FilePath,"'"
-                                         " KeyPath='yes' />\n",lists:duplicate(N+3,32),
-                                         "</Component>\n"]}
-                        end
-                end)
-      end, Files),
-    collect(Pids).
-
-collect(Pids) -> collect(Pids, []).
-collect([], Acc) -> Acc;
-collect(Pids, Acc) ->
-    receive
-        {P,S} -> collect(Pids -- [P], [S|Acc])
-    end.
 
 build_features(Proj, Version, FileH) ->
     ok = file:write(FileH,
@@ -704,120 +788,6 @@ build_features(Proj, Version, FileH) ->
             end),
     ok = file:write(FileH, "      </Feature>\n\n"),
     ok = file:write(FileH, "   </Feature>\n\n").
-
-get_id(undefined, Field, undefined) when is_list(Field) ->
-    Id = "id_"++?H(Field),
-    case lookup(Id) of
-        [] ->
-            Item = #item{id = Id, name = Field},
-            ok = insert(Item),
-            {ok, Item#item.id};
-        [#item{} = Item] ->
-            {ok, Item#item.id}
-    end;
-get_id(Type, Field, undefined) when is_atom(Field) ->
-    Id = "id_"++?H(Field),
-    case lookup(Id) of
-        [] ->
-            Item = #item{id = Id, name = Field, guid = uuid()},
-            case Type of
-                component ->
-                    ok = insert(Item#item{type=component}),
-                    {Item#item.id, Item#item.guid};
-                _ ->
-                    ok = insert(Item),
-                    {ok, Item#item.guid}
-            end;
-        [#item{} = Item] ->
-            case Type of
-                component -> {Item#item.id, Item#item.guid};
-                _ -> {ok, Item#item.guid}
-            end
-    end;
-get_id(Type, F, Dir)
-  when Type =:= component;
-       Type =:= file;
-       Type =:= dir ->
-    Id = "id_"++?H({Type, filename:join([Dir, F])}),
-    {ok, FI} = file:read_file_info(filename:join([Dir, F])),
-    case lookup(Id) of
-        [] ->
-            Item = #item{id = Id
-                         , type = Type
-                         , guid = if Type =:= component -> uuid();
-                                     true -> undefined end
-                         , name = F
-                         , path = Dir
-                         , file_info = FI
-                        },
-            ok = insert(Item),
-            case Type of
-                component -> {Item#item.id, Item#item.guid};
-                file -> {ok, Item#item.id};
-                dir -> {ok, Item#item.id}
-            end;
-        [#item{name = F, path = Dir, file_info = FI} = Item] ->
-            case Type of
-                component -> {Item#item.id, Item#item.guid};
-                file -> {ok, Item#item.id};
-                dir -> {ok, Item#item.id}
-            end;
-        [#item{name = F, path = Dir} = I] ->
-            Item = I#item{guid = if Type =:= component -> uuid();
-                                    true -> undefined end
-                          , file_info = FI},
-            ok = insert(Item),
-            case Type of
-                component -> {Item#item.id, Item#item.guid};
-                file -> {ok, Item#item.id};
-                dir -> {ok, Item#item.id}
-            end;
-        Items ->
-            ?L("CLASH ~p with ~p", [{Type, F, Dir, Id}, Items]),
-            error(duplicate)
-    end.
-
-select(MatchSpec) ->
-    C = get(config),
-    case get(use_dets) of
-        true ->
-            dets:select(C#config.tab, MatchSpec);
-        false ->
-            ets:select(C#config.tab, MatchSpec)
-    end.
-
-insert(Item) ->
-    C = get(config),
-    case get(use_dets) of
-        true -> ok = dets:insert(C#config.tab, Item);
-        false ->
-            true = ets:insert(C#config.tab, Item)
-    end,
-    ok.
-
-lookup(Id) ->
-    C = get(config),
-    case get(use_dets) of
-        true -> dets:lookup(C#config.tab, Id);
-        false -> ets:lookup(C#config.tab, Id)
-    end.
-
-
-foreach(Fun) when is_function(Fun, 1) ->
-    C = get(config),
-    case get(use_dets) of
-        true ->
-            dets:traverse(C#config.tab,
-                          fun(Row) ->
-                                  Fun(Row),
-                                  continue
-                          end);
-        false ->
-            ets:foldl(fun(Row, '$unused') ->
-                              Fun(Row),
-                              '$unused'
-                      end, '$unused', C#config.tab)
-    end.
 
 sync() ->
     C = get(config),

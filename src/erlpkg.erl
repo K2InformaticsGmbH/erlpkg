@@ -37,15 +37,15 @@ do(State) ->
     case re:run(rebar_api:get_arch(), "^([0-9\.]+)-(.*)-([0-9]+)$",
                 [{capture, [1,2,3], list}]) of
         {match, [O, S, W]} -> [O, S, W];
-        Other -> rebar_api:abort("{~p,~p} rebar_api:get_arch() : ~p",
-                                 [?MODULE, ?LINE, Other])
+        Other -> ?ABORT("{~p,~p} rebar_api:get_arch() : ~p",
+                        [?MODULE, ?LINE, Other])
     end,
     {ok, RootDir} = file:get_cwd(),
     Profile =
     case rebar_state:current_profiles(State) of
         [default, P] -> P;
-        Other1 -> rebar_api:abort("{~p,~p} bad profiles : ~p",
-                                  [?MODULE, ?LINE, Other1])
+        Other1 -> ?ABORT("{~p,~p} bad profiles : ~p",
+                         [?MODULE, ?LINE, Other1])
     end,
     ReleaseDir = ?FNJ([RootDir, "_build", Profile, "rel"]),
     PkgDir = ?FNJ(ReleaseDir, "erlpkg"),
@@ -53,34 +53,33 @@ do(State) ->
     RebarConfigOpts = rebar_state:get(State, erlpkg_opts, []),
     Opts = lists:ukeymerge(1, lists:ukeysort(1, RebarConfigOpts),
                            lists:ukeysort(1, ClOpts)),
-    if length(Opts) == 0 ->
-           rebar_api:abort("missing arguments");
-       true ->
-           ?D("Opts ~p", [Opts])
-    end,
+    if length(Opts) == 0 -> ?ABORT("missing arguments");
+       true -> ok end,
     [AppInfo] = rebar_state:project_apps(State),
     AppName = binary_to_list(rebar_app_info:name(AppInfo)),
     Version = rebar_app_info:original_vsn(AppInfo),
     Description = proplists:get_value(
                     description, rebar_app_info:app_details(AppInfo), ""),
-    C0 = #{app => AppName, version => Version, desc => Description,
-           topDir => RootDir, pkgDir => PkgDir, relDir => ReleaseDir,
-           otp => OTP_VSN, arch => SYSTEM_ARCH, word => WORDSIZE},
+    ReleaseAppDir = ?FNJ(ReleaseDir, AppName),
+    C0 = (maps:from_list(Opts))
+    #{app => AppName, version => Version, desc => Description,
+      topDir => RootDir, pkgDir => PkgDir, relDir => ReleaseDir,
+      otp => OTP_VSN, arch => SYSTEM_ARCH, word => WORDSIZE,
+      profile => Profile, relAppDir => ReleaseAppDir},
+
     C1 = patch_timestamp(C0),
-    ?D("CONFIG ~p", [C1]),
-    ?D("OTP ~p, ARCH ~p, WORD ~p profile ~p~nRoot ~p~nReleaseDir ~p"
-       "~nApp ~p~nAppVsn ~p~nDetails ~p",
-       [OTP_VSN, SYSTEM_ARCH, WORDSIZE, Profile, RootDir, ReleaseDir,
-        AppName, Version, Description]),
+    ?D("CONFIG:~n~p", [C1]),
     case SYSTEM_ARCH of
         "win32" ->
-            ?C("rebar_api:console()", []),
-            ?I("rebar_api:info()", []),
-            ?W("rebar_api:warn()", []),
-            ?E("rebar_api:error()", []),
-            ?D("debug", []);
-        SYSTEM_ARCH ->
-            rebar_api:abort("not supported ~s", [SYSTEM_ARCH])
+            C2 = windows:init_msi(C1),
+            C3 = windows:create_wxs(C2),
+            ?D("CONFIG:~n~p", [C3]),
+            ok;
+            %?C("rebar_api:console()", []),
+            %?I("rebar_api:info()", []),
+            %?W("rebar_api:warn()", []),
+            %?E("rebar_api:error()", []);
+        SYSTEM_ARCH -> ?ABORT("not supported ~s", [SYSTEM_ARCH])
     end,
     {ok, State}.
 
@@ -88,12 +87,10 @@ do(State) ->
 format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
-
 patch_timestamp(C) ->
     BeamPath = ?FNJ([maps:get(relDir, C), maps:get(app, C), "lib",
                      maps:get(app, C)++"-"++maps:get(version, C),
                      "ebin"]),
-    ?D("BeamPath ~p", [BeamPath]),
     [{{{_,Month,Day},{Hour,_,_}},_}|_]
     = lists:reverse(
         lists:usort(
