@@ -1,9 +1,9 @@
 -module(windows).
 -include("erlpkg.hrl").
 
--export([init_msi/1, create_wxs/1]).
+-export([build/1]).
 
-init_msi(#{} = C0) ->
+build(#{} = C0) ->
     C1 = C0#{candle => os:find_executable("candle.exe"),
              light => os:find_executable("light.exe")},
     case C1 of
@@ -22,17 +22,18 @@ init_msi(#{} = C0) ->
     %end,
     C2 = C1#{tab => list_to_atom(maps:get(app, C1))},
     ets:new(maps:get(tab, C2), [public, named_table, {keypos, 2}]),
-    C2.
+    create_wxs(C2).
 
 create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
-             company := Company, upgradecode := UpgradeCode, desc := Comment} = C) ->
-    C1 = start_time(C, create_wxs),
+             company := Company, upgradecode := UpgradeCode, desc := Comment} = C0) ->
+    C1 = start_time(C0, create_wxs),
     ensure_path(PkgDir),
     WxsFile = filename:join([PkgDir, lists:flatten([Proj,"-",Version,".wxs"])]),
     ?I("Create ~s", [WxsFile]),
     ?I("--------------------------------------------------------------------------------"),
-    {ok, FileH} = file:open(WxsFile, [write, raw]),
-    C2 = C1#{wxsFileH => FileH},
+    {ok, FileH} = file:open(WxsFile, [write]),
+    ?D("FileH ~p", [FileH]),
+    C = C1#{wxsFileH => FileH},
 
     {ok, PRODUCT_GUID} = get_id(C, undefined, 'PRODUCT_GUID', undefined),
     {ok, UPGRADE_GUID} = case UpgradeCode of
@@ -103,7 +104,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "       <Directory Id='"++ID++"' Name='"++Company++"'>\n"
         "         <Directory Id='INSTALLDIR' Name='"++Proj++"'>\n"),
 
-    walk_release(C2),
+    walk_release(C),
     ?I("finished walking OTP release"),
 
     ok = file:write(FileH,
@@ -121,9 +122,9 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
                                       guid=undefined, _='_'}, [], ['$_']}]),
     [EditConfEs] = select(C, [{#item{type=component, name="editconfs.escript",
                                   _='_'}, [], ['$_']}]),
-    [SrvcCtrlEs] = select(C, [{#item{type=component, name=Proj++".escript",
+    [SrvcCtrlEs] = select(C, [{#item{type=component, name=Proj++".cmd",
                                   _='_'}, [], ['$_']}]),
-    [SrvcCtrlEsFile] = select(C, [{#item{type=file, name=Proj++".escript",
+    [SrvcCtrlEsFile] = select(C, [{#item{type=file, name=Proj++".cmd",
                                       guid=undefined, _='_'}, [], ['$_']}]),
 
     {ProgFolderId, ProgFolderGuId} = get_id(C, component, 'PROGSMENUFOLDER_GUID', undefined),
@@ -149,8 +150,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
 
     ?I("finished TARGETDIR section"),
 
-    %build_features(Proj, Version, FileH),
-
+    build_features(C),
     ?I("feature sections created"),
 
     ok = file:write(FileH,
@@ -284,25 +284,8 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
 
     SrvcCommand = "\"[INSTALLDIR]"
                   ++ string:join(
-                       lists:sublist(EscriptExePath, length(EscriptExePath)-1, 2)
-                       ++ ["escript.exe"]
-                       , "\\")
-                  ++ "\" \"[INSTALLDIR]"
-                  ++ string:join(
                        lists:sublist(SrvcCtrlEsPath, length(SrvcCtrlEsPath), 1)
-                       ++ [Proj++".escript"]
-                       , "\\")
-                  ++ "\"",
-
-    InsldSrvcCmd = "\"[INSTALLDIR]"
-                  ++ string:join(
-                       lists:sublist(EscriptExePath, length(EscriptExePath)-1, 2)
-                       ++ ["escript.exe"]
-                       , "\\")
-                  ++ "\" \"[INSTALLDIR]"
-                  ++ string:join(
-                       lists:sublist(SrvcCtrlEsPath, length(SrvcCtrlEsPath), 1)
-                       ++ [Proj++".escript"]
+                       ++ [Proj++".cmd"]
                        , "\\")
                   ++ "\"",
 
@@ -331,11 +314,10 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     %  must run after InstallFiles step is 'comitted'
     ok = file:write(FileH,
         "   <CustomAction Id='InstallService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" install \""++Proj++"\""
-                          " \""++Comment++"\"'\n"
+        "                 ExeCommand='"++SrvcCommand++" install'\n"
         "                 Execute='commit' Impersonate='no' />\n"
         "   <CustomAction Id='StartService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++SrvcCommand++" start \""++Proj++"\"'\n"
+        "                 ExeCommand='"++SrvcCommand++" start'\n"
         "                 Execute='commit' Impersonate='no' />\n"
     % Custom actions service stop and uninstall
     %  must run immediately and before InstallValidate step to ensure that
@@ -343,10 +325,10 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     %  uninstalling process detecets and warns
     %  Execute='deferred' is MUST to enforce immediate elivated execution
         "   <CustomAction Id='UnInstallService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++InsldSrvcCmd++" uninstall \""++Proj++"\"'\n"
+        "                 ExeCommand='"++SrvcCommand++" uninstall'\n"
         "                 Execute='deferred' Impersonate='no' />\n"
         "   <CustomAction Id='StopService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++InsldSrvcCmd++" stop \""++Proj++"\"'\n"
+        "                 ExeCommand='"++SrvcCommand++" stop'\n"
         "                 Execute='deferred' Impersonate='no' />\n\n"),
 
     ?I("added service control custom actions"),
@@ -385,14 +367,14 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "       <Component Id='"++ProgFolderId++"' Guid='"++ProgFolderGuId++"'>\n"
         "           <Shortcut Id='programattach'\n"
         "                     Name='"++Proj++" Attach'\n"
-        "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
-        "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
+        "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
+        "                     Arguments='attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <Shortcut Id='programgui'\n"
         "                     Name='"++Proj++" GUI'\n"
-        "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
-        "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
+        "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
+        "                     Arguments='console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationProgramMenuFolder' On='uninstall'/>\n"
@@ -450,14 +432,14 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "       <Component Id='"++DsktpShortId++"' Guid='"++DsktpShortGuId++"'>\n"
         "           <Shortcut Id='desktopattach'\n"
         "                     Name='"++Proj++" Attach'\n"
-        "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
-        "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" attach'\n"
+        "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
+        "                     Arguments='attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <Shortcut Id='desktopgui'\n"
         "                     Name='"++Proj++" GUI'\n"
-        "                     Target='[#"++EscriptExeFile#item.id++"]'\n"
-        "                     Arguments='\"[#"++SrvcCtrlEsFile#item.id++"]\" console'\n"
+        "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
+        "                     Arguments='console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='application.ico' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationDesktopFolder' On='uninstall'/>\n"
@@ -483,9 +465,9 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     ?I("finised building wxs"),
 
     ok = file:close(FileH),
-    C1 = end_time(C, create_wxs),
+    C2 = end_time(C, create_wxs),
     ?I("--------------------------------------------------------------------------------"),
-    C1.
+    C2.
 
 ensure_path(Path) ->
     case filelib:is_dir(Path) of
@@ -506,10 +488,12 @@ start_time(C, Field) ->
     C#{stats => (maps:get(stats, C, #{}))#{Field => os:timestamp()}}.
 
 end_time(C, Field) ->
-    case C of %maps:get(Field, maps:get(stats, C, #{}), '$not_defined') of
+    case C of
         #{stats := #{Field := Start} = Stats} ->
             C#{stats => Stats#{stats => timer:now_diff(os:timestamp(), Start)}};
-        C -> ?W("Stat ~p is not defined", [Field])
+        C ->
+            ?W("Stat ~p is not defined", [Field]),
+            C
     end.
 
 get_id(C, undefined, Field, undefined) when is_list(Field) ->
@@ -606,59 +590,43 @@ walk_release(#{relAppDir := ReleaseRoot} = C) ->
     case filelib:is_dir(ReleaseRoot) of
         true ->
             walk_release(
-              C, length(ReleaseRoot)+2, filelib:wildcard("*", ReleaseRoot),
-              ReleaseRoot, 12),
-            ?D("");
+              C, length(ReleaseRoot)+2,
+              filelib:wildcard("*", ReleaseRoot), ReleaseRoot, 12);
         false -> ?ABORT("~p is not a directory", [ReleaseRoot])
     end.
 
-walk_release(C, PathPrefixLen, Files, Dir, N) ->
-    collect(
-      C, Dir,
-      lists:map(
-           fun(F) ->
-                   Self = self(),
-                   spawn(fun() ->
-                                 walk_release(Self, C, F, PathPrefixLen, Files, Dir, N)
-                         end)
-           end, Files)).
-walk_release(Self, C, F, PathPrefixLen, Files, Dir, N) ->
-    ProcessPath = ?FNJ([Dir,F]),
-    case filelib:is_dir(ProcessPath) of
-        true ->
-?D(">>>ProcessPath>>> ~s", [ProcessPath]),
-            FilesAtThisLevel = filelib:wildcard("*", ProcessPath),
-?D(">>>FilesAtThisLevel>>> ~p", [FilesAtThisLevel]),
-            {ok, DirId} = get_id(C, dir, F, Dir),
-            ?D("~s/", [string:substr(ProcessPath, PathPrefixLen)]),
-            Self ! {self(),
-                    [lists:duplicate(N,32), "<Directory Id='", DirId, "' Name='", F, "'>\n",
-                     walk_release(C, PathPrefixLen, FilesAtThisLevel, ProcessPath, N+3),
-                     lists:duplicate(N,32), "</Directory>\n"]};
-        false ->
-            FilePath = get_filepath(Dir, F),
-            {Id, GuID} = get_id(C, component, F, Dir),
-            {ok, FileId} = get_id(C, file, F, Dir),
-            Self ! {self(),
-                    [lists:duplicate(N+3,32),
-                     "<Component Id='",Id,"' Guid='",GuID,"'>\n",lists:duplicate(N+3,32),
-                     "   <File Id='",FileId,"' Name='",F,
-                     "' DiskId='1' Source='",FilePath,"'"
-                     " KeyPath='yes' />\n",lists:duplicate(N+3,32),
-                     "</Component>\n"]}
-    end.
-
-
-collect(C, Dir, Pids) ->
-    collect(C, Dir, length(Pids), Pids, []).
-collect(#{wxsFileH := FileH}, _Dir, PidCount, [], Acc) ->
-    ok = file:write(FileH, lists:flatten(Acc));
-collect(C, Dir, PidCount, Pids, Acc) ->
-    receive
-        {P,S} ->
-%            ?D("~p/~p to process in ~p", [length(Pids) - 1, PidCount, Dir]),
-            collect(C, Dir, PidCount, Pids -- [P], [S|Acc])
-    end.
+walk_release(#{wxsFileH := FileH} = C, PathPrefixLen, Files, Dir, N) ->
+    lists:map(
+      fun(F) ->
+        ProcessPath = ?FNJ([Dir,F]),
+        case filelib:is_dir(ProcessPath) of
+            true ->
+                FilesAtThisLevel = filelib:wildcard("*", ProcessPath),
+                {ok, DirId} = get_id(C, dir, F, Dir),
+                ?D("~s/", [string:substr(ProcessPath, PathPrefixLen)]),
+                Content = [lists:duplicate(N,32), "<Directory Id='", DirId, "' Name='", F, "'>\n",
+                         walk_release(C, PathPrefixLen, FilesAtThisLevel, ProcessPath, N+3),
+                         lists:duplicate(N,32), "</Directory>\n"],
+                case catch file:write(FileH, Content) of
+                    ok -> "";
+                    Error -> ?E("~p to write ~p", [Error, Content])
+                end;
+            false ->
+                FilePath = get_filepath(Dir, F),
+                {Id, GuID} = get_id(C, component, F, Dir),
+                {ok, FileId} = get_id(C, file, F, Dir),
+                Content = [lists:duplicate(N+3,32),
+                         "<Component Id='",Id,"' Guid='",GuID,"'>\n",lists:duplicate(N+3,32),
+                         "   <File Id='",FileId,"' Name='",F,
+                         "' DiskId='1' Source='",FilePath,"'"
+                         " KeyPath='yes' />\n",lists:duplicate(N+3,32),
+                         "</Component>\n"],
+                case catch file:write(FileH, Content) of
+                    ok -> "";
+                    Error -> ?E("~p to write ~p", [Error, Content])
+                end
+        end
+      end, Files).
 
 get_filepath(Dir, F) ->
     FilePathNoRel =
@@ -669,6 +637,24 @@ get_filepath(Dir, F) ->
           end,
           [], filename:split(Dir)),
     ?FNJ([".." | FilePathNoRel]++[F]).
+
+build_features(#{wxsFileH := FileH, app := Proj, version := Version} = C) ->
+    ok = file:write(FileH,
+        "   <Feature Id='Complete' Title='"++Proj++"-"++Version++"'"
+                    " Description='The complete package.'"
+                    " Level='1' ConfigurableDirectory='INSTALLDIR'>\n"),
+    ok = file:write(FileH,
+        "      <Feature Id='MainProgram' Title='"++Proj++"-"++Version
+                                                        ++" service'"
+                    " Description='The service.' Level='1'>\n"),
+    foreach(
+      C,
+      fun(#item{type=component, id = Id}) ->
+              ok = file:write(FileH, "         <ComponentRef Id='"++Id++"' />\n");
+         (_) -> ok
+      end),
+    ok = file:write(FileH, "      </Feature>\n\n"),
+    ok = file:write(FileH, "   </Feature>\n\n").
 
 -ifdef(FINISHED).
 
@@ -691,7 +677,6 @@ candle_light() ->
                  "-out", MsiFile | WixObjs]),
     ok = file:set_cwd(CurDir),
     end_time(candle_light).
-
 
 run_port(Cmd, Args) ->
     log_cmd(Cmd,
@@ -769,31 +754,5 @@ generate_msi_name() ->
     lists:flatten([C#config.app,"-",
                    C#config.version,".", C#config.patchCode,"_",
                    MsiDate,".msi"]).
-
-
-build_features(Proj, Version, FileH) ->
-    ok = file:write(FileH,
-        "   <Feature Id='Complete' Title='"++Proj++"-"++Version++"'"
-                    " Description='The complete package.'"
-                    " Level='1' ConfigurableDirectory='INSTALLDIR'>\n"),
-    ok = file:write(FileH,
-        "      <Feature Id='MainProgram' Title='"++Proj++"-"++Version
-                                                        ++" service'"
-                    " Description='The service.' Level='1'>\n"),
-    sync(),
-    foreach(fun(#item{type=component, id = Id}) ->
-                    ok = file:write(
-                           FileH, "         <ComponentRef Id='"++Id++"' />\n");
-               (_) -> ok
-            end),
-    ok = file:write(FileH, "      </Feature>\n\n"),
-    ok = file:write(FileH, "   </Feature>\n\n").
-
-sync() ->
-    C = get(config),
-    case get(use_dets) of
-        true -> dets:sync(C#config.tab);
-        false -> nop
-    end.
 
 -endif. % FINISHED

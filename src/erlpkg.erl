@@ -71,9 +71,8 @@ do(State) ->
     ?D("CONFIG:~n~p", [C1]),
     case SYSTEM_ARCH of
         "win32" ->
-            C2 = windows:init_msi(C1),
-            C3 = windows:create_wxs(C2),
-            ?D("CONFIG:~n~p", [C3]),
+            C2 = windows:build(C1),
+            ?D("CONFIG:~n~p", [C2]),
             ok;
             %?C("rebar_api:console()", []),
             %?I("rebar_api:info()", []),
@@ -82,6 +81,7 @@ do(State) ->
         SYSTEM_ARCH -> ?ABORT("not supported ~s", [SYSTEM_ARCH])
     end,
     {ok, State}.
+
 
 -spec format_error(any()) ->  iolist().
 format_error(Reason) ->
