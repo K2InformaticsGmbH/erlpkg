@@ -14,15 +14,10 @@ build(#{} = C0) ->
               [?MODULE, ?LINE]);
         _ -> ok
     end,
-    %case file:copy(?FNJ([C2#config.scriptDir,"service.escript"]),
-    %               ?FNJ([C2#config.relDir,"bin",C#config.app++".escript"])) of
-    %    {error, Error} ->
-    %        exit({"failed to copy service.escript", Error});
-    %    _ -> ok
-    %end,
     C2 = C1#{tab => list_to_atom(maps:get(app, C1))},
     ets:new(maps:get(tab, C2), [public, named_table, {keypos, 2}]),
-    create_wxs(C2).
+    C3 = create_wxs(C2),
+    candle_light(C3).
 
 create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
              company := Company, upgradecode := UpgradeCode, desc := Comment} = C0) ->
@@ -156,8 +151,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     ok = file:write(FileH,
         "   <WixVariable Id='WixUILicenseRtf' Value='License.rtf' />\n"
         "   <WixVariable Id='WixUIBannerBmp' Value='banner493x58.jpg' />\n"
-        "   <WixVariable Id='WixUIDialogBmp'"
-                       " Value='dialog493x312.jpg' />\n\n"),
+        "   <WixVariable Id='WixUIDialogBmp' Value='dialog493x312.jpg' />\n\n"),
 
     ?I("added banner and dialog images and license"),
 
@@ -165,21 +159,21 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "   <UIRef Id='WixUI_Mondo' />\n"
         "   <UIRef Id='WixUI_ErrorProgressText' />\n\n"),
 
-    % External Dialog Chaining
-    ok = file:write(FileH,
-        "   <UI Id='CustWixUI_Mondo'>\n"
-        "       <UIRef Id='WixUI_Mondo' />\n"
-        "       <UIRef Id='WixUI_ErrorProgressText' />\n\n"
-
-        "       <DialogRef Id='ServiceSetupDlg' />\n"
-
-        "       <Publish Dialog='CustomizeDlg' Control='Next'\n"
-        "                Event='NewDialog' Value='ServiceSetupDlg'\n"
-        "                Order='3'>LicenseAccepted = 1</Publish>\n"
-        "       <Publish Dialog='VerifyReadyDlg' Control='Back'\n"
-        "                Event='NewDialog' Value='ServiceSetupDlg'>\n"
-        "           1</Publish>\n"
-        "   </UI>\n\n"),
+%    % External Dialog Chaining
+%    ok = file:write(FileH,
+%        "   <UI Id='CustWixUI_Mondo'>\n"
+%        "       <UIRef Id='WixUI_Mondo' />\n"
+%        "       <UIRef Id='WixUI_ErrorProgressText' />\n\n"
+%
+%        "       <DialogRef Id='ServiceSetupDlg' />\n"
+%
+%        "       <Publish Dialog='CustomizeDlg' Control='Next'\n"
+%        "                Event='NewDialog' Value='ServiceSetupDlg'\n"
+%        "                Order='3'>LicenseAccepted = 1</Publish>\n"
+%        "       <Publish Dialog='VerifyReadyDlg' Control='Back'\n"
+%        "                Event='NewDialog' Value='ServiceSetupDlg'>\n"
+%        "           1</Publish>\n"
+%        "   </UI>\n\n"),
 
     ?I("added custom setup dialog"),
 
@@ -465,9 +459,8 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     ?I("finised building wxs"),
 
     ok = file:close(FileH),
-    C2 = end_time(C, create_wxs),
     ?I("--------------------------------------------------------------------------------"),
-    C2.
+    end_time(C, create_wxs).
 
 ensure_path(Path) ->
     case filelib:is_dir(Path) of
@@ -656,27 +649,28 @@ build_features(#{wxsFileH := FileH, app := Proj, version := Version} = C) ->
     ok = file:write(FileH, "      </Feature>\n\n"),
     ok = file:write(FileH, "   </Feature>\n\n").
 
--ifdef(FINISHED).
-
-candle_light() ->
-    start_time(candle_light),
-    Verbose = get(verbose),
-    C = get(config),
+candle_light(#{candle := Candle, light := Light, pkgDir := PkgDir} = C) ->
+    C1 = start_time(C, candle_light),
     {ok, CurDir} = file:get_cwd(),
-    ok = file:set_cwd(C#config.topDir),
+    ok = file:set_cwd(PkgDir),
     Wxses = filelib:wildcard("*.wxs"),
     ?I("candle with ~p", [Wxses]),
-    run_port(C#config.candle, if Verbose -> ["-v"]; true -> [] end
-             ++ ["-arch", "x64", "-ext", "WixUtilExtension" | Wxses]),
+    run_port(Candle, ["-v", "-arch", "x64", "-ext", "WixUtilExtension" | Wxses]),
     WixObjs = filelib:wildcard("*.wixobj"),
-    MsiFile = generate_msi_name(),
+    MsiFile = generate_msi_name(C1),
     ?I("light ~s with ~p", [MsiFile, WixObjs]),
-    run_port(C#config.light, if Verbose -> ["-v"]; true -> [] end
-             ++ ["-ext", "WixUtilExtension",
-                 "-ext", "WixUIExtension",
-                 "-out", MsiFile | WixObjs]),
+    run_port(
+      Light, ["-v", "-ext", "WixUtilExtension", "-ext", "WixUIExtension",
+              "-out", MsiFile | WixObjs]),
     ok = file:set_cwd(CurDir),
-    end_time(candle_light).
+    end_time(C1, candle_light).
+
+generate_msi_name(#{app := App, version := Version,
+                    patchCode := PatchCode} = C) ->
+    {{Y,M,D},{H,Mn,S}} = calendar:local_time(),
+    MsiDate = io_lib:format("~4..0B~2..0B~2..0B_~2..0B~2..0B~2..0B",
+                            [Y,M,D,H,Mn,S]),
+    lists:flatten([App,"-", Version,".", PatchCode,"_", MsiDate,".msi"]).
 
 run_port(Cmd, Args) ->
     log_cmd(Cmd,
@@ -685,14 +679,15 @@ run_port(Cmd, Args) ->
               [{line, 128},{args, Args}, exit_status,
                stderr_to_stdout, {parallelism, true}])).
 run_port(Cmd, Args, Cwd) ->
-    ?Lg("run_port(~p, ~p, ~p)", [Cmd, Args, Cwd]),
+    ?I("run_port(~p, ~p, ~p)", [Cmd, Args, Cwd]),
     log_cmd(Cmd,
             erlang:open_port(
               {spawn_executable,Cmd},
               [{cd,Cwd},{line,128},{args,Args},exit_status,stderr_to_stdout,
                {parallelism,true}])).
 
-log_cmd(Cmd, Port) when is_port(Port) ->
+log_cmd(Cmd, Port) -> log_cmd(Cmd, Port, []).
+log_cmd(Cmd, Port, Buf) when is_port(Port) ->
     receive
         {'EXIT',Port,Reason} -> ?E("~s terminated for ~p", [Cmd, Reason]);
         {Port,closed} -> ?E("~s terminated", [Cmd]);
@@ -700,12 +695,19 @@ log_cmd(Cmd, Port) when is_port(Port) ->
             ?E("~s exit with status ~p", [Cmd, Status]),
             catch erlang:port_close(Port);
         {Port,{data,{F,Line}}} ->
-            ?NL("~s" ++ if F =:= eol -> "~n"; true -> "" end, [Line]),
-            log_cmd(Cmd, Port);
+            log_cmd(
+              Cmd, Port,
+              if F =:= eol ->
+                     ?D("~s", [lists:reverse([Line|Buf])]),
+                     [];
+                 true -> [Line|Buf]
+              end);
         {Port,{data,Data}} ->
-            ?NL("~p", [Data]),
+            ?D("~p", [Data]),
             log_cmd(Cmd, Port)
     end.
+
+-ifdef(FINISHED).
 
 gen_patch_ts() ->
     C = get(config),
@@ -745,14 +747,4 @@ timestamp() ->
     io_lib:format("~2..0w~2..0w~4..0w-~2..0w~2..0w~2..0w.~s",
                   [Day,Month,Year,Hour,Minute,Second,
                    string:left(integer_to_list(Micro), 3, $0)]).
-
-generate_msi_name() ->
-    C = get(config),
-    {{Y,M,D},{H,Mn,S}} = calendar:local_time(),
-    MsiDate = io_lib:format("~4..0B~2..0B~2..0B_~2..0B~2..0B~2..0B",
-                            [Y,M,D,H,Mn,S]),
-    lists:flatten([C#config.app,"-",
-                   C#config.version,".", C#config.patchCode,"_",
-                   MsiDate,".msi"]).
-
 -endif. % FINISHED

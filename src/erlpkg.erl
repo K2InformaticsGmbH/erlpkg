@@ -61,11 +61,12 @@ do(State) ->
     Description = proplists:get_value(
                     description, rebar_app_info:app_details(AppInfo), ""),
     ReleaseAppDir = ?FNJ(ReleaseDir, AppName),
+    ConfDir = ?FNJ(RootDir, "config"),
     C0 = (maps:from_list(Opts))
     #{app => AppName, version => Version, desc => Description,
-      topDir => RootDir, pkgDir => PkgDir, relDir => ReleaseDir,
-      otp => OTP_VSN, arch => SYSTEM_ARCH, word => WORDSIZE,
-      profile => Profile, relAppDir => ReleaseAppDir},
+      topDir => RootDir, pkgDir => PkgDir, rootDir => RootDir, otp => OTP_VSN,
+      arch => SYSTEM_ARCH, word => WORDSIZE, profile => Profile,
+      configDir => ConfDir, relAppDir => ReleaseAppDir},
 
     C1 = patch_timestamp(C0),
     ?D("CONFIG:~n~p", [C1]),
@@ -88,7 +89,7 @@ format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
 patch_timestamp(C) ->
-    BeamPath = ?FNJ([maps:get(relDir, C), maps:get(app, C), "lib",
+    BeamPath = ?FNJ([maps:get(relAppDir, C), "lib",
                      maps:get(app, C)++"-"++maps:get(version, C),
                      "ebin"]),
     [{{{_,Month,Day},{Hour,_,_}},_}|_]
