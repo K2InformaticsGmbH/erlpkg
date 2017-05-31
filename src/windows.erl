@@ -17,18 +17,50 @@ build(#{} = C0) ->
     C2 = C1#{tab => list_to_atom(maps:get(app, C1))},
     ets:new(maps:get(tab, C2), [public, named_table, {keypos, 2}]),
     C3 = create_wxs(C2),
-    candle_light(C3).
+    %candle_light(C3).
+    C3.
+
+copy_assets(#{pkgDir := PkgDir} = C) ->
+    maps:fold(
+     fun(K, V, M) when K == icon; K == banner; K == dialog; K == license ->
+             Dst = ?FNJ(PkgDir, filename:basename(V)),
+             case catch file:copy(V, Dst) of
+                 {ok, Bytes} ->
+                     ?D("copied ~p bytes from ~s to ~s", [Bytes, V, Dst]),
+                     M#{K => filename:basename(V)};
+                 Error ->
+                     ?D("~s copy to ~s failed : ~p", [V, PkgDir, Error]),
+                     ?ABORT("Failed to copy ~s to ~s", [V, PkgDir])
+             end;
+        (xdlgs, Vs, M) ->
+             M#{xdlgs => 
+             lists:filtermap(
+              fun(IV) ->
+                      IDst = ?FNJ(PkgDir, filename:basename(IV)),
+                      case catch file:copy(IV, IDst) of
+                          {ok, Bytes} ->
+                              ?D("copied ~p bytes from ~s to ~s",
+                                 [Bytes, IV, IDst]),
+                              filename:basename(IV);
+                          Error ->
+                              ?E("~s copy to ~s failed : ~p",
+                                 [IV, PkgDir, Error])
+                      end
+              end, Vs)};
+        (K, V, M) -> M#{K => V}
+     end, #{}, C).
 
 create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
              company := Company, upgradecode := UpgradeCode, desc := Comment} = C0) ->
     C1 = start_time(C0, create_wxs),
     ensure_path(PkgDir),
+    C2 = copy_assets(C1),
     WxsFile = filename:join([PkgDir, lists:flatten([Proj,"-",Version,".wxs"])]),
     ?I("Create ~s", [WxsFile]),
     ?I("--------------------------------------------------------------------------------"),
     {ok, FileH} = file:open(WxsFile, [write]),
     ?D("FileH ~p", [FileH]),
-    C = C1#{wxsFileH => FileH},
+    C = C2#{wxsFileH => FileH},
 
     {ok, PRODUCT_GUID} = get_id(C, undefined, 'PRODUCT_GUID', undefined),
     {ok, UPGRADE_GUID} = case UpgradeCode of
@@ -148,17 +180,18 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     build_features(C),
     ?I("feature sections created"),
 
+    #{license := License, banner := Banner, dialog := Dialog} = C,
     ok = file:write(FileH,
-        "   <WixVariable Id='WixUILicenseRtf' Value='License.rtf' />\n"
-        "   <WixVariable Id='WixUIBannerBmp' Value='banner493x58.jpg' />\n"
-        "   <WixVariable Id='WixUIDialogBmp' Value='dialog493x312.jpg' />\n\n"),
+        "   <WixVariable Id='WixUILicenseRtf' Value='"++License++"' />\n"
+        "   <WixVariable Id='WixUIBannerBmp' Value='"++Banner++"' />\n"
+        "   <WixVariable Id='WixUIDialogBmp' Value='"++Dialog++"' />\n\n"),
 
     ?I("added banner and dialog images and license"),
 
-    ok = file:write(FileH,
-        "   <UIRef Id='WixUI_Mondo' />\n"
-        "   <UIRef Id='WixUI_ErrorProgressText' />\n\n"),
-
+%    ok = file:write(FileH,
+%        "   <UIRef Id='WixUI_Mondo' />\n"
+%        "   <UIRef Id='WixUI_ErrorProgressText' />\n\n"),
+%
 %    % External Dialog Chaining
 %    ok = file:write(FileH,
 %        "   <UI Id='CustWixUI_Mondo'>\n"

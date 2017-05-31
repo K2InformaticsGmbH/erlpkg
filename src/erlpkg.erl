@@ -23,7 +23,13 @@ init(State) ->
             % list of options understood by the plugin
             {opts,
              [{company,     $c, "company",      string, "Name of the company"},
-              {upgradecode, $u, "upgradecode",  string, "UUID of the product"}
+              {upgradecode, $u, "upgradecode",  string, "UUID of the product"},
+
+              {icon,    $i, "icon",     {string, "defaults/app.ico"},     "Application Icon"},
+              {banner,  $b, "banner",   {string, "defaults/493x58.jpg"},  "Application Banner"},
+              {dialog,  $d, "dialog",   {string, "defaults/493x312.jpg"}, "Application Dialog Skin"},
+              {license, $l, "license",  {string, "defaults/License.rtf"}, "Application License"},
+              {xdlgs,   $e, "extra dialogs",  undefined, "Application Extra Wix dialogs (optional)"}
              ]},
             {short_desc, "MSI and RPM builder"},
             {desc, "Windows MSI and Linux RPM installer packager for erlang"}
@@ -49,12 +55,7 @@ do(State) ->
     end,
     ReleaseDir = ?FNJ([RootDir, "_build", Profile, "rel"]),
     PkgDir = ?FNJ(ReleaseDir, "erlpkg"),
-    {ClOpts,_} = rebar_state:command_parsed_args(State),
-    RebarConfigOpts = rebar_state:get(State, erlpkg_opts, []),
-    Opts = lists:ukeymerge(1, lists:ukeysort(1, RebarConfigOpts),
-                           lists:ukeysort(1, ClOpts)),
-    if length(Opts) == 0 -> ?ABORT("missing arguments");
-       true -> ok end,
+    Opts = get_opts(RootDir, State),
     [AppInfo] = rebar_state:project_apps(State),
     AppName = binary_to_list(rebar_app_info:name(AppInfo)),
     Version = rebar_app_info:original_vsn(AppInfo),
@@ -62,12 +63,11 @@ do(State) ->
                     description, rebar_app_info:app_details(AppInfo), ""),
     ReleaseAppDir = ?FNJ(ReleaseDir, AppName),
     ConfDir = ?FNJ(RootDir, "config"),
-    C0 = (maps:from_list(Opts))
-    #{app => AppName, version => Version, desc => Description,
-      topDir => RootDir, pkgDir => PkgDir, rootDir => RootDir, otp => OTP_VSN,
-      arch => SYSTEM_ARCH, word => WORDSIZE, profile => Profile,
-      configDir => ConfDir, relAppDir => ReleaseAppDir},
-
+    C0 = Opts#{app => AppName, version => Version, desc => Description,
+               topDir => RootDir, pkgDir => PkgDir, rootDir => RootDir,
+               otp => OTP_VSN, arch => SYSTEM_ARCH, word => WORDSIZE,
+               profile => Profile, configDir => ConfDir,
+               relAppDir => ReleaseAppDir},
     C1 = patch_timestamp(C0),
     ?D("CONFIG:~n~p", [C1]),
     case SYSTEM_ARCH of
@@ -102,3 +102,52 @@ patch_timestamp(C) ->
                   io_lib:format(
                     "~2..0B~2..0B~2..0B", [Month,Day,Hour])),
     C#{patchCode => PatchCode}.
+
+get_opts(RootDir, State) ->
+    {ClOpts,_} = rebar_state:command_parsed_args(State),
+    RebarConfigOpts = rebar_state:get(State, erlpkg_opts, []),
+    Opts = maps:from_list(
+             lists:ukeymerge(1, lists:ukeysort(1, RebarConfigOpts),
+                             lists:ukeysort(1, ClOpts))),
+    if map_size(Opts) == 0 -> ?ABORT("missing arguments");
+       true ->
+           [Dir|_] =
+           lists:filtermap(
+             fun(App) ->
+                     case rebar_app_info:name(App) of
+                         <<"erlpkg">> -> {true, rebar_app_info:dir(App)};
+                         _ -> false
+                     end
+             end,
+             rebar_state:all_plugin_deps(State)),
+           maps:fold(
+             fun(K,V,M) when K == icon; K == banner; K == dialog;
+                             K == license ->
+                     FullPath = ?FNJ(RootDir, V),
+                     case filelib:is_regular(FullPath) of
+                         true -> M#{K => FullPath};
+                         false ->
+                             FullDefaultPath = ?FNJ(Dir, V),
+                             case filelib:is_regular(FullDefaultPath) of
+                                 true -> M#{K => FullDefaultPath};
+                                 false ->
+                                     ?ABORT("bad config ~p:~p",
+                                            [K, FullDefaultPath])
+                             end
+                     end;
+                (xdlgs, Vs, M) when is_list(Vs) ->
+                     M#{xdlgs =>
+                        lists:foldl(
+                          fun(IV, IVs) ->
+                                  FullIVPath = ?FNJ(RootDir, IV),
+                                  case filelib:is_regular(FullIVPath) of
+                                      true -> [FullIVPath | IVs];
+                                      false ->
+                                          ?W("[xdlgs] ~s NOT FOUND in ~s",
+                                             [IV, RootDir]),
+                                          IVs
+                                  end
+                          end, [], Vs)};
+                (K,V,M) -> M#{K => V}
+             end, #{}, Opts)
+    end.
