@@ -29,7 +29,8 @@ init(State) ->
               {banner,  $b, "banner",   {string, "defaults/493x58.jpg"},  "Application Banner"},
               {dialog,  $d, "dialog",   {string, "defaults/493x312.jpg"}, "Application Dialog Skin"},
               {license, $l, "license",  {string, "defaults/License.rtf"}, "Application License"},
-              {xdlgs,   $e, "extra dialogs",  undefined, "Application Extra Wix dialogs (optional)"}
+              {xdlgs,   $e, "extra dialogs",  undefined, "Application Extra Wix dialogs (optional)"},
+              {msi,     $m, "extra confs",  undefined, "Application Extra Wix configs (optional)"}
              ]},
             {short_desc, "MSI and RPM builder"},
             {desc, "Windows MSI and Linux RPM installer packager for erlang"}
@@ -55,25 +56,29 @@ do(State) ->
     end,
     ReleaseDir = ?FNJ([RootDir, "_build", Profile, "rel"]),
     PkgDir = ?FNJ(ReleaseDir, "erlpkg"),
-    Opts = get_opts(RootDir, State),
+    ConfDir = ?FNJ(RootDir, "config"),
+    Opts = get_opts(ConfDir, State),
     [AppInfo] = rebar_state:project_apps(State),
     AppName = binary_to_list(rebar_app_info:name(AppInfo)),
     Version = rebar_app_info:original_vsn(AppInfo),
     Description = proplists:get_value(
                     description, rebar_app_info:app_details(AppInfo), ""),
     ReleaseAppDir = ?FNJ(ReleaseDir, AppName),
-    ConfDir = ?FNJ(RootDir, "config"),
+    VmArgs = conf_file:parse_vmargs(
+               ?FNJ([ReleaseAppDir,"releases",Version,"vm.args"])),
+    SysConfig = conf_file:parse_config(
+                  ?FNJ([ReleaseAppDir,"releases",Version,"sys.config"])),
     C0 = Opts#{app => AppName, version => Version, desc => Description,
-               topDir => RootDir, pkgDir => PkgDir, rootDir => RootDir,
-               otp => OTP_VSN, arch => SYSTEM_ARCH, word => WORDSIZE,
-               profile => Profile, configDir => ConfDir,
-               relAppDir => ReleaseAppDir},
+               pkgDir => PkgDir, rootDir => RootDir, otp => OTP_VSN,
+               arch => SYSTEM_ARCH, word => WORDSIZE, profile => Profile,
+               configDir => ConfDir, relAppDir => ReleaseAppDir,
+               vmargs => VmArgs, sysconfig => SysConfig},
     C1 = patch_timestamp(C0),
     ?D("CONFIG:~n~p", [C1]),
     case SYSTEM_ARCH of
         "win32" ->
             C2 = windows:build(C1),
-            ?D("CONFIG:~n~p", [C2]),
+            ?I("STATS:~n~p", [maps:get(stats, C2)]),
             ok;
             %?C("rebar_api:console()", []),
             %?I("rebar_api:info()", []),
@@ -103,7 +108,7 @@ patch_timestamp(C) ->
                     "~2..0B~2..0B~2..0B", [Month,Day,Hour])),
     C#{patchCode => PatchCode}.
 
-get_opts(RootDir, State) ->
+get_opts(ConfDir, State) ->
     {ClOpts,_} = rebar_state:command_parsed_args(State),
     RebarConfigOpts = rebar_state:get(State, erlpkg_opts, []),
     Opts = maps:from_list(
@@ -123,7 +128,7 @@ get_opts(RootDir, State) ->
            maps:fold(
              fun(K,V,M) when K == icon; K == banner; K == dialog;
                              K == license ->
-                     FullPath = ?FNJ(RootDir, V),
+                     FullPath = ?FNJ(ConfDir, V),
                      case filelib:is_regular(FullPath) of
                          true -> M#{K => FullPath};
                          false ->
@@ -139,12 +144,12 @@ get_opts(RootDir, State) ->
                      M#{xdlgs =>
                         lists:foldl(
                           fun(IV, IVs) ->
-                                  FullIVPath = ?FNJ(RootDir, IV),
+                                  FullIVPath = ?FNJ(ConfDir, IV),
                                   case filelib:is_regular(FullIVPath) of
                                       true -> [FullIVPath | IVs];
                                       false ->
                                           ?W("[xdlgs] ~s NOT FOUND in ~s",
-                                             [IV, RootDir]),
+                                             [IV, ConfDir]),
                                           IVs
                                   end
                           end, [], Vs)};

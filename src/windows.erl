@@ -16,9 +16,16 @@ build(#{} = C0) ->
     end,
     C2 = C1#{tab => list_to_atom(maps:get(app, C1))},
     ets:new(maps:get(tab, C2), [public, named_table, {keypos, 2}]),
-    C3 = create_wxs(C2),
-    %candle_light(C3).
-    C3.
+    C3 = case C2 of
+             #{msi := MsiConfPath, configDir := ConfDir}
+               when is_list(MsiConfPath) ->
+                 [MSI] = conf_file:parse_config(?FNJ(ConfDir, MsiConfPath)),
+                 C2#{msi => MSI};
+             _ -> C2
+         end,
+    C4 = create_wxs(C3),
+    candle_light(C4).
+    %C4.
 
 copy_assets(#{pkgDir := PkgDir} = C) ->
     maps:fold(
@@ -41,34 +48,37 @@ copy_assets(#{pkgDir := PkgDir} = C) ->
                           {ok, Bytes} ->
                               ?D("copied ~p bytes from ~s to ~s",
                                  [Bytes, IV, IDst]),
-                              filename:basename(IV);
+                              {true, filename:rootname(filename:basename(IV))};
                           Error ->
                               ?E("~s copy to ~s failed : ~p",
-                                 [IV, PkgDir, Error])
+                                 [IV, PkgDir, Error]),
+                              false
                       end
               end, Vs)};
         (K, V, M) -> M#{K => V}
      end, #{}, C).
 
 create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
-             company := Company, upgradecode := UpgradeCode, desc := Comment} = C0) ->
+             company := Company, upgradecode := UpgradeCode,
+             desc := Comment} = C0) ->
     C1 = start_time(C0, create_wxs),
     ensure_path(PkgDir),
     C2 = copy_assets(C1),
     WxsFile = filename:join([PkgDir, lists:flatten([Proj,"-",Version,".wxs"])]),
     ?I("Create ~s", [WxsFile]),
-    ?I("--------------------------------------------------------------------------------"),
+    ?I("---------------------------------------------------------------------"),
     {ok, FileH} = file:open(WxsFile, [write]),
     ?D("FileH ~p", [FileH]),
-    C = C2#{wxsFileH => FileH},
+    C3 = C2#{wxsFileH => FileH},
 
-    {ok, PRODUCT_GUID} = get_id(C, undefined, 'PRODUCT_GUID', undefined),
-    {ok, UPGRADE_GUID} = case UpgradeCode of
-                             '$no_upgrade_code_defined' ->
-                                 get_id(C, undefined, 'UPGRADE_GUID', undefined);
-                             UpgradeCode -> {ok, UpgradeCode}
-                         end,
-    {ok, ID} = get_id(C, undefined, Company, undefined),
+    {ok, PRODUCT_GUID} = get_id(C3, undefined, 'PRODUCT_GUID', undefined),
+    {ok, UPGRADE_GUID} =
+    case UpgradeCode of
+        '$no_upgrade_code_defined' ->
+            get_id(C2, undefined, 'UPGRADE_GUID', undefined);
+        UpgradeCode -> {ok, UpgradeCode}
+    end,
+    {ok, ID} = get_id(C2, undefined, Company, undefined),
     ok = file:write(FileH,
         "<?xml version='1.0' encoding='windows-1252'?>\n"
         "<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'\n"
@@ -91,13 +101,15 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "            InstallPrivileges='elevated'\n"
         "            SummaryCodepage='1252' />\n\n"
 
-        "   <MajorUpgrade DowngradeErrorMessage='A later version of [ProductName]"
-                             " is already installed. Setup will now exit.' />\n\n"
+        "   <MajorUpgrade"
+                " DowngradeErrorMessage='A later version of [ProductName]"
+                    " is already installed. Setup will now exit.' />\n\n"
 
         "   <Media Id='1' Cabinet='"++Proj++".cab' EmbedCab='yes'\n"
         "          DiskPrompt='CD-ROM #1'/>\n"
         "   <Property Id='DiskPrompt'\n"
-        "             Value=\""++Company++" "++Proj++" Installation [1]\"/>\n\n"),
+        "             Value=\""++Company++" "++Proj
+                                             ++" Installation [1]\"/>\n\n"),
 
     ?I("wxs header sections created"),
 
@@ -105,8 +117,8 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "   <Directory Id='TARGETDIR' Name='SourceDir'>\n"),
 
     % AppData PATH
-    {CoDatId, CoDatGuId} = get_id(C, component, 'COMPANYDAT_GUID', undefined),
-    {AppDatId, AppDatGuId} = get_id(C, component, 'PRODUCTDAT_GUID', undefined),
+    {CoDatId, CoDatGuId} = get_id(C3, component, 'COMPANYDAT_GUID', undefined),
+    {AppDatId, AppDatGuId} = get_id(C3, component, 'PRODUCTDAT_GUID', undefined),
     ok = file:write(FileH,
         "     <Directory Id='CommonAppDataFolder' Name='CommonAppData'>\n"
         "       <Directory Id='COMPANYDAT' Name='"++Company++"'>\n"
@@ -131,7 +143,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "       <Directory Id='"++ID++"' Name='"++Company++"'>\n"
         "         <Directory Id='INSTALLDIR' Name='"++Proj++"'>\n"),
 
-    walk_release(C),
+    walk_release(C3),
     ?I("finished walking OTP release"),
 
     ok = file:write(FileH,
@@ -142,20 +154,22 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     ?I("finished ProgramFiles64Folder section"),
 
     % Property references
-    [BootDir] = select(C, [{#item{type=dir, name=Version, _='_'}, [], ['$_']}]),
-    [EscriptExe] = select(C, [{#item{type=component, name="escript.exe",_='_'},
+    [BootDir] = select(C3, [{#item{type=dir, name=Version, _='_'}, [], ['$_']}]),
+    [EscriptExe] = select(C3, [{#item{type=component, name="escript.exe",_='_'},
                             [], ['$_']}]),
-    [EscriptExeFile] = select(C, [{#item{type=file, name="escript.exe",
+    [EscriptExeFile] = select(C3, [{#item{type=file, name="escript.exe",
                                       guid=undefined, _='_'}, [], ['$_']}]),
-    [EditConfEs] = select(C, [{#item{type=component, name="editconfs.escript",
+    [EditConfEs] = select(C3, [{#item{type=component, name="editconfs.escript",
                                   _='_'}, [], ['$_']}]),
-    [SrvcCtrlEs] = select(C, [{#item{type=component, name=Proj++".cmd",
+    [SrvcCtrlEs] = select(C3, [{#item{type=component, name=Proj++".cmd",
                                   _='_'}, [], ['$_']}]),
-    [SrvcCtrlEsFile] = select(C, [{#item{type=file, name=Proj++".cmd",
+    [SrvcCtrlEsFile] = select(C3, [{#item{type=file, name=Proj++".cmd",
                                       guid=undefined, _='_'}, [], ['$_']}]),
 
-    {ProgFolderId, ProgFolderGuId} = get_id(C, component, 'PROGSMENUFOLDER_GUID', undefined),
-    {DsktpShortId, DsktpShortGuId} = get_id(C, component, 'DESKTOPSHORTCUT_GUID', undefined),
+    {ProgFolderId, ProgFolderGuId} =
+    get_id(C3, component, 'PROGSMENUFOLDER_GUID', undefined),
+    {DsktpShortId, DsktpShortGuId} =
+    get_id(C3, component, 'DESKTOPSHORTCUT_GUID', undefined),
 
     ok = file:write(FileH,
         "     <Directory Id='ProgramMenuFolder' Name='Programs'>\n"
@@ -177,10 +191,10 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
 
     ?I("finished TARGETDIR section"),
 
-    build_features(C),
+    build_features(C3),
     ?I("feature sections created"),
 
-    #{license := License, banner := Banner, dialog := Dialog} = C,
+    #{license := License, banner := Banner, dialog := Dialog} = C3,
     ok = file:write(FileH,
         "   <WixVariable Id='WixUILicenseRtf' Value='"++License++"' />\n"
         "   <WixVariable Id='WixUIBannerBmp' Value='"++Banner++"' />\n"
@@ -188,101 +202,45 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
 
     ?I("added banner and dialog images and license"),
 
-%    ok = file:write(FileH,
-%        "   <UIRef Id='WixUI_Mondo' />\n"
-%        "   <UIRef Id='WixUI_ErrorProgressText' />\n\n"),
-%
-%    % External Dialog Chaining
-%    ok = file:write(FileH,
-%        "   <UI Id='CustWixUI_Mondo'>\n"
-%        "       <UIRef Id='WixUI_Mondo' />\n"
-%        "       <UIRef Id='WixUI_ErrorProgressText' />\n\n"
-%
-%        "       <DialogRef Id='ServiceSetupDlg' />\n"
-%
-%        "       <Publish Dialog='CustomizeDlg' Control='Next'\n"
-%        "                Event='NewDialog' Value='ServiceSetupDlg'\n"
-%        "                Order='3'>LicenseAccepted = 1</Publish>\n"
-%        "       <Publish Dialog='VerifyReadyDlg' Control='Back'\n"
-%        "                Event='NewDialog' Value='ServiceSetupDlg'>\n"
-%        "           1</Publish>\n"
-%        "   </UI>\n\n"),
+    case C3 of
+        #{xdlgs := ExtraDlgs} when length(ExtraDlgs) > 0 ->
+            ok = file:write(FileH,
+               "   <UIRef Id='WixUI_Mondo' />\n"
+               "   <UIRef Id='WixUI_ErrorProgressText' />\n\n"),
+            lists:foreach(
+              fun(ExtraDlg) ->
+                % External Dialog Chaining
+                ok = file:write(FileH,
+                   "   <UI Id='CustWixUI_Mondo'>\n"
+                   "       <UIRef Id='WixUI_Mondo' />\n"
+                   "       <UIRef Id='WixUI_ErrorProgressText' />\n\n"
+
+                   "       <DialogRef Id='"++ExtraDlg++"' />\n"
+
+                   "       <Publish Dialog='CustomizeDlg' Control='Next'\n"
+                   "                Event='NewDialog' Value='"++ExtraDlg++"'\n"
+                   "                Order='3'>LicenseAccepted = 1</Publish>\n"
+                   "       <Publish Dialog='VerifyReadyDlg' Control='Back'\n"
+                   "                Event='NewDialog' Value='"++ExtraDlg++"'>\n"
+                   "           1</Publish>\n"
+                   "   </UI>\n\n")
+              end, ExtraDlgs);
+        _ -> ?I("No custom dlialog chained")
+    end,
 
     ?I("added custom setup dialog"),
 
-    [VmArgsFile] = select(C, [{#item{type=file, name="vm.args", _='_'}, [],
-                            ['$_']}]),
-    [SysConfigFile] = select(C, [{#item{type=file, name="sys.config", _='_'}, [],
-                               ['$_']}]),
-    {ok, VmArgsBin} = file:read_file(?FNJ(VmArgsFile#item.path, "vm.args")),
-    {match, [Node]} = re:run(VmArgsBin
-                             , ".*-name (.*)[\r\n]"
-                             , [{capture, [1], list}, ungreedy, dotall]),
-    {match, [Cookie]} = re:run(VmArgsBin
-                               , ".*-setcookie (.*)[\r\n]"
-                               , [{capture, [1], list}, ungreedy, dotall]),
-
-    {ok, [SysConfigs]} = file:consult(?FNJ(SysConfigFile#item.path, "sys.config")),
-
-    DDErl = proplists:get_value(dderl, SysConfigs),
-    DDErlIntf = proplists:get_value(interface, DDErl),
-    DDErlPort = integer_to_list(proplists:get_value(port, DDErl)),
-
-    Imem = proplists:get_value(imem, SysConfigs),
-    ImemNodeType = atom_to_list(proplists:get_value(mnesia_node_type, Imem)),
-    ImemSchemaName = atom_to_list(proplists:get_value(mnesia_schema_name, Imem)),
-    ImemClustMgrs = lists:flatten(io_lib:format("~p", [proplists:get_value(erl_cluster_mgrs, Imem)])),
-    ImemIntf = proplists:get_value(tcp_ip, Imem),
-    ImemPort = integer_to_list(proplists:get_value(tcp_port, Imem)),
-    ImemNodeShardFun0 = lists:flatten(io_lib:format("~p", [proplists:get_value(node_shard_fun, Imem)])),
-    [$"|ImemNodeShardFun1] = ImemNodeShardFun0,
-    [$"|ImemNodeShardFun2] = lists:reverse(ImemNodeShardFun1),
-    ImemNodeShardFun = lists:reverse(ImemNodeShardFun2),
-
-    ok = file:write(FileH,
-        "   <Property Id='NODENAME'>\n"
-        "       <RegistrySearch Id='Locate_NODENAME' Root='HKLM'\n"
-        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                       Name='NodeName' Type='raw' />\n"++Node++
-        "   </Property>\n"
-        "   <Property Id='NODECOOKIE'>\n"
-        "       <RegistrySearch Id='Locate_NODECOOKIE' Root='HKLM'\n"
-        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                       Name='NodeCookie' Type='raw' />\n"++Cookie++
-        "   </Property>\n"
-        "   <Property Id='WEBSRVINTF'>\n"
-        "       <RegistrySearch Id='Locate_WEBSRVINTF' Root='HKLM'\n"
-        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                       Name='WebSrvIntf' Type='raw' />\n"++DDErlIntf++":"++DDErlPort++
-        "   </Property>\n"
-        "   <Property Id='DBNODETYPE'>\n"
-        "       <RegistrySearch Id='Locate_DBNODETYPE' Root='HKLM'\n"
-        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                       Name='DbNodeType' Type='raw' />\n"++ImemNodeType++
-        "   </Property>\n"
-        "   <Property Id='DBNODETYPE_DISC'>disc</Property>\n"
-        "   <Property Id='DBNODETYPE_RAM'>ram</Property>\n"
-        "   <Property Id='DBNODESCHEMANAME'>\n"
-        "       <RegistrySearch Id='Locate_DBNODESCHEMANAME' Root='HKLM'\n"
-        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                       Name='DbNodeSchemaName' Type='raw' />\n"++ImemSchemaName++
-        "   </Property>\n"
-        "   <Property Id='DBCLUSTERMGRS'>\n"
-        "       <RegistrySearch Id='Locate_DBCLUSTERMGRS' Root='HKLM'\n"
-        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                       Name='DbClusterManagers' Type='raw' />\n"
-        "       <![CDATA["++ImemClustMgrs++"]]></Property>\n"
-        "   <Property Id='DBNODESHARDFUN'>\n"
-        "       <RegistrySearch Id='Locate_DBNODESHARDFUN' Root='HKLM'\n"
-        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                       Name='DbNodeShardFunction' Type='raw' />\n"
-        "       <![CDATA["++ImemNodeShardFun++"]]></Property>\n"
-        "   <Property Id='DBINTF'>\n"
-        "       <RegistrySearch Id='Locate_DBINTF' Root='HKLM'\n"
-        "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                       Name='DbInterface' Type='raw' />\n"++ImemIntf++":"++ImemPort++
-        "   </Property>\n\n"),
-
+    C4 = C3#{msi => conf_file:map(maps:get(msi, C3, #{}), C3)},
+    _ = maps:map(
+          fun(K, V) ->
+            ok = file:write(FileH,
+                "   <Property Id='"++string:to_upper(K)++"'>\n"
+                "       <RegistrySearch Id='Locate_"++K++"' Root='HKLM'\n"
+                "                       Key='Software\\[Manufacturer]\\[ProductName]'\n"
+                "                       Name='"++K++"' Type='raw' />\n"
+                "       <![CDATA["++V++"]]></Property>\n")
+          end, maps:get(msi, C4)),
+ 
     % Read real installation folder from registry if exists
     ok = file:write(FileH,
         "   <Property Id='INSTALLDIR' Secure='yes'>\n"
@@ -291,7 +249,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "                       Name='InstallPath' Type='directory' />\n"
         "   </Property>\n\n"),
 
-    ?I("added properties connecting to custom setup dialog"),
+    ?I("added properties"),
 
     %% Service customization
     EscriptExePath = filename:split(EscriptExe#item.path),
@@ -326,13 +284,11 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     %  impersonate to retain file modification priviledges
     ok = file:write(FileH,
         "   <CustomAction Id='ConfigService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++ExecCommand++" \"[NODENAME]\" "
-                                      "\"[NODECOOKIE]\" \"[WEBSRVINTF]\" "
-                                      "\"[DBNODETYPE]\" \"[DBNODESCHEMANAME]\" "
-                                      "\"[DBCLUSTERMGRS]\" \"[DBINTF]\" "
-                                      "\"[DBNODESHARDFUN]\" "
-                                      "\"["++BootDir#item.id++"]\\\" "
-                                      "\"[PRODUCTDAT]\\\"'\n"
+        "                 ExeCommand='"++ExecCommand++" "
+                                      "\"HKLM\\Software\\[Manufacturer]"
+                                                    "\\[ProductName]\" "
+                                      "\"["++BootDir#item.id++"]\" "
+                                      "\"[PRODUCTDAT]\"'\n"
         "                 Execute='commit' Impersonate='no' />\n\n"),
 
     ?I("added service configuration custom action"),
@@ -397,13 +353,13 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
         "                     Arguments='attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
-        "                     Icon='application.ico' IconIndex='0' />\n"
+        "                     Icon='APPICON' IconIndex='0' />\n"
         "           <Shortcut Id='programgui'\n"
         "                     Name='"++Proj++" GUI'\n"
         "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
         "                     Arguments='console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
-        "                     Icon='application.ico' IconIndex='0' />\n"
+        "                     Icon='APPICON' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationProgramMenuFolder' On='uninstall'/>\n"
         "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
@@ -413,40 +369,20 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
         "                          Name='InstallPath' Type='string'\n"
-        "                          Value='[INSTALLDIR]' KeyPath='no'/>\n"
+        "                          Value='[INSTALLDIR]' KeyPath='no'/>\n"),
+
+    _ = maps:map(
+          fun(K, _V) ->
+            ok = file:write(FileH,
         % Remember all configurable parameters in registry
         "           <RegistryValue Root='HKLM'\n"
-        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                          Name='NodeName' Type='string'\n"
-        "                          Value='[NODENAME]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKLM'\n"
-        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                          Name='NodeCookie' Type='string'\n"
-        "                          Value='[NODECOOKIE]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKLM'\n"
-        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                          Name='WebSrvIntf' Type='string'\n"
-        "                          Value='[WEBSRVINTF]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKLM'\n"
-        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                          Name='DbNodeType' Type='string'\n"
-        "                          Value='[DBNODETYPE]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKLM'\n"
-        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                          Name='DbNodeSchemaName' Type='string'\n"
-        "                          Value='[DBNODESCHEMANAME]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKLM'\n"
-        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                          Name='DbClusterManagers' Type='string'\n"
-        "                          Value='[DBCLUSTERMGRS]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKLM'\n"
-        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                          Name='DbInterface' Type='string'\n"
-        "                          Value='[DBINTF]' KeyPath='no'/>\n"
-        "           <RegistryValue Root='HKLM'\n"
-        "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
-        "                          Name='DbNodeShardFunction' Type='string'\n"
-        "                          Value='[DBNODESHARDFUN]' KeyPath='no'/>\n"
+        "                          Key='Software\\[Manufacturer]\\[ProductName]'"
+                                                                             "\n"
+        "                          Name='"++K++"' Type='string'\n"
+        "                          Value='["++string:to_upper(K)++"]' KeyPath='no'/>\n")
+          end, maps:get(msi, C4)),
+
+    ok = file:write(FileH,
         % Recursively remove application from path
         "           <util:RemoveFolderEx On='uninstall' Property='INSTALLDIR' />\n"
         "       </Component>\n"
@@ -462,13 +398,13 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
         "                     Arguments='attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
-        "                     Icon='application.ico' IconIndex='0' />\n"
+        "                     Icon='APPICON' IconIndex='0' />\n"
         "           <Shortcut Id='desktopgui'\n"
         "                     Name='"++Proj++" GUI'\n"
         "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
         "                     Arguments='console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
-        "                     Icon='application.ico' IconIndex='0' />\n"
+        "                     Icon='APPICON' IconIndex='0' />\n"
         "           <RemoveFolder Id='ApplicationDesktopFolder' On='uninstall'/>\n"
         "           <RegistryValue Root='HKLM'\n"
         "                          Key='Software\\[Manufacturer]\\[ProductName]'\n"
@@ -479,11 +415,12 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
 
     ?I("added short cuts to ApplicationDesktopFolder"),
 
+    #{icon := AppIcon} = C3,
     ok = file:write(FileH,
-        "   <Icon Id='application.ico' SourceFile='application.ico' />\n"),
+        "   <Icon Id='APPICON' SourceFile='"++AppIcon++"' />\n"),
 
     ok = file:write(FileH,
-        "   <Property Id='ARPPRODUCTICON' Value='application.ico' />"),
+        "   <Property Id='ARPPRODUCTICON' Value='APPICON' />"),
 
     ok = file:write(FileH,
         "</Product>\n"
@@ -492,8 +429,8 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     ?I("finised building wxs"),
 
     ok = file:close(FileH),
-    ?I("--------------------------------------------------------------------------------"),
-    end_time(C, create_wxs).
+    ?I("---------------------------------------------------------------------"),
+    end_time(C3, create_wxs).
 
 ensure_path(Path) ->
     case filelib:is_dir(Path) of
@@ -516,7 +453,7 @@ start_time(C, Field) ->
 end_time(C, Field) ->
     case C of
         #{stats := #{Field := Start} = Stats} ->
-            C#{stats => Stats#{stats => timer:now_diff(os:timestamp(), Start)}};
+            C#{stats => Stats#{Field => timer:now_diff(os:timestamp(), Start)}};
         C ->
             ?W("Stat ~p is not defined", [Field]),
             C
@@ -687,11 +624,11 @@ candle_light(#{candle := Candle, light := Light, pkgDir := PkgDir} = C) ->
     {ok, CurDir} = file:get_cwd(),
     ok = file:set_cwd(PkgDir),
     Wxses = filelib:wildcard("*.wxs"),
-    ?I("candle with ~p", [Wxses]),
+    ?I("candle ~p", [Wxses]),
     run_port(Candle, ["-v", "-arch", "x64", "-ext", "WixUtilExtension" | Wxses]),
     WixObjs = filelib:wildcard("*.wixobj"),
     MsiFile = generate_msi_name(C1),
-    ?I("light ~s with ~p", [MsiFile, WixObjs]),
+    ?I("light ~p -> ~s", [WixObjs, MsiFile]),
     run_port(
       Light, ["-v", "-ext", "WixUtilExtension", "-ext", "WixUIExtension",
               "-out", MsiFile | WixObjs]),
@@ -706,13 +643,14 @@ generate_msi_name(#{app := App, version := Version,
     lists:flatten([App,"-", Version,".", PatchCode,"_", MsiDate,".msi"]).
 
 run_port(Cmd, Args) ->
+    ?D("run_port(~p, ~p)", [Cmd, Args]),
     log_cmd(Cmd,
             erlang:open_port(
               {spawn_executable,Cmd},
               [{line, 128},{args, Args}, exit_status,
                stderr_to_stdout, {parallelism, true}])).
 run_port(Cmd, Args, Cwd) ->
-    ?I("run_port(~p, ~p, ~p)", [Cmd, Args, Cwd]),
+    ?D("run_port(~p, ~p, ~p)", [Cmd, Args, Cwd]),
     log_cmd(Cmd,
             erlang:open_port(
               {spawn_executable,Cmd},
@@ -725,7 +663,11 @@ log_cmd(Cmd, Port, Buf) when is_port(Port) ->
         {'EXIT',Port,Reason} -> ?E("~s terminated for ~p", [Cmd, Reason]);
         {Port,closed} -> ?E("~s terminated", [Cmd]);
         {Port,{exit_status,Status}} ->
-            ?E("~s exit with status ~p", [Cmd, Status]),
+            if Status == 0 ->
+                ?I("~s finished successfully", [Cmd]);
+               true ->
+                   ?E("~s exit with status ~p", [Cmd, Status])
+            end,
             catch erlang:port_close(Port);
         {Port,{data,{F,Line}}} ->
             log_cmd(
@@ -761,13 +703,13 @@ gen_patch_ts() ->
 
 print_stats() ->
     C = get(config),
-    ?L("--------------------------------------------------------------------------------"),
+    ?L("---------------------------------------------------------------------"),
     ?L("total build time ~s", [ft(maps:get(total, C#config.stats))]),
-    ?L("--------------------------------------------------------------------------------"),
+    ?L("---------------------------------------------------------------------"),
     maps:fold(fun(K, V, _) when K /= total -> ?L("~p time ~s", [K, ft(V)]);
                  (_, _, _) -> undefined
               end, undefined, C#config.stats),
-    ?L("--------------------------------------------------------------------------------").
+    ?L("---------------------------------------------------------------------").
 
 ft(T) when T < 1000 -> integer_to_list(T)++"us";
 ft(T) when T >= 1000, T < 1000000 -> integer_to_list(T div 1000)++"ms";
