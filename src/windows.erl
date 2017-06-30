@@ -567,13 +567,13 @@ walk_release(#{wxsFileH := FileH} = C, PathPrefixLen, Files, Dir, N) ->
                 FilesAtThisLevel = filelib:wildcard("*", ProcessPath),
                 {ok, DirId} = get_id(C, dir, F, Dir),
                 ?D("~s/", [string:substr(ProcessPath, PathPrefixLen)]),
-                Content = [lists:duplicate(N,32), "<Directory Id='", DirId, "' Name='", F, "'>\n",
-                         walk_release(C, PathPrefixLen, FilesAtThisLevel, ProcessPath, N+3),
-                         lists:duplicate(N,32), "</Directory>\n"],
-                case catch file:write(FileH, Content) of
-                    ok -> "";
-                    Error -> ?E("~p to write ~p", [Error, Content])
-                end;
+                Indent = lists:duplicate(N,32),
+                ok = file:write(
+                       FileH,
+                       [Indent, "<Directory Id='", DirId, "' Name='", F, "'>\n"]),
+
+                walk_release(C, PathPrefixLen, FilesAtThisLevel, ProcessPath, N+3),
+                ok = file:write(FileH, [Indent, "</Directory>\n"]);
             false ->
                 FilePath = get_filepath(Dir, F),
                 {Id, GuID} = get_id(C, component, F, Dir),
@@ -584,10 +584,7 @@ walk_release(#{wxsFileH := FileH} = C, PathPrefixLen, Files, Dir, N) ->
                          "' DiskId='1' Source='",FilePath,"'"
                          " KeyPath='yes' />\n",lists:duplicate(N+3,32),
                          "</Component>\n"],
-                case catch file:write(FileH, Content) of
-                    ok -> "";
-                    Error -> ?E("~p to write ~p", [Error, Content])
-                end
+                ok = file:write(FileH, Content)
         end
       end, Files).
 
