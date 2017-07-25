@@ -288,7 +288,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
                                       "\"\\HKLM\\Software\\[Manufacturer]"
                                                     "\\[ProductName]\" "
                                       "\"[INSTALLDIR]releases\\" ++ Version ++ "\" "
-                                      "\"[PRODUCTDAT].\"'\n"
+                                      "\"[PRODUCTDAT]\\\"'\n"
         "                 Execute='commit' Impersonate='no' />\n\n"),
 
     ?I("added service configuration custom action"),
