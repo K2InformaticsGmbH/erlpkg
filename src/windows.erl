@@ -285,10 +285,10 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     ok = file:write(FileH,
         "   <CustomAction Id='ConfigService' Directory='"++BootDir#item.id++"'\n"
         "                 ExeCommand='"++ExecCommand++" "
-                                      "\"HKLM\\Software\\[Manufacturer]"
+                                      "\"\\HKLM\\Software\\[Manufacturer]"
                                                     "\\[ProductName]\" "
-                                      "\"["++BootDir#item.id++"]\" "
-                                      "\"[PRODUCTDAT]\"'\n"
+                                      "\"[INSTALLDIR]releases\\" ++ Version ++ "\" "
+                                      "\"[PRODUCTDAT].\"'\n"
         "                 Execute='commit' Impersonate='no' />\n\n"),
 
     ?I("added service configuration custom action"),
