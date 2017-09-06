@@ -255,7 +255,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     EscriptExePath = filename:split(EscriptExe#item.path),
     EditConfEsPath = filename:split(EditConfEs#item.path),
     SrvcCtrlEsPath = filename:split(SrvcCtrlEs#item.path),
-    ExecCommand = "\"[INSTALLDIR]"
+    EditConfExeCmd = "\"[INSTALLDIR]"
                   ++ string:join(
                        lists:sublist(EscriptExePath, length(EscriptExePath)-1, 2)
                        ++ ["escript.exe"]
@@ -284,11 +284,9 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     %  impersonate to retain file modification priviledges
     ok = file:write(FileH,
         "   <CustomAction Id='ConfigService' Directory='"++BootDir#item.id++"'\n"
-        "                 ExeCommand='"++ExecCommand++" "
-                                      "\"\\HKLM\\Software\\[Manufacturer]"
-                                                    "\\[ProductName]\" "
-                                      "\"[INSTALLDIR]releases\\" ++ Version ++ "\" "
-                                      "\"[PRODUCTDAT]\\\"'\n"
+        "                 ExeCommand='"++EditConfExeCmd++" "
+                                      "\"\\HKLM\\Software\\[Manufacturer]\\[ProductName]\" "
+                                      ++Version++"'\n"
         "                 Execute='commit' Impersonate='no' />\n\n"),
 
     ?I("added service configuration custom action"),
