@@ -64,7 +64,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     C1 = start_time(C0, create_wxs),
     ensure_path(PkgDir),
     C2 = copy_assets(C1),
-    WxsFile = filename:join([PkgDir, lists:flatten([Proj,"-",Version,".wxs"])]),
+    WxsFile = ?FNJ([PkgDir, lists:flatten([Proj,"-",Version,".wxs"])]),
     ?I("Create ~s", [WxsFile]),
     ?I("---------------------------------------------------------------------"),
     {ok, FileH} = file:open(WxsFile, [write]),
@@ -157,8 +157,6 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     [BootDir] = select(C3, [{#item{type=dir, name=Version, _='_'}, [], ['$_']}]),
     [EscriptExe] = select(C3, [{#item{type=component, name="escript.exe",_='_'},
                             [], ['$_']}]),
-    [EscriptExeFile] = select(C3, [{#item{type=file, name="escript.exe",
-                                      guid=undefined, _='_'}, [], ['$_']}]),
     [EditConfEs] = select(C3, [{#item{type=component, name="editconfs.escript",
                                   _='_'}, [], ['$_']}]),
     [SrvcCtrlEs] = select(C3, [{#item{type=component, name=Proj++".cmd",
@@ -620,62 +618,22 @@ candle_light(#{candle := Candle, light := Light, pkgDir := PkgDir} = C) ->
     ok = file:set_cwd(PkgDir),
     Wxses = filelib:wildcard("*.wxs"),
     ?I("candle ~p", [Wxses]),
-    run_port(Candle, ["-v", "-arch", "x64", "-ext", "WixUtilExtension" | Wxses]),
+    erlpkg_utils:run_port(Candle, ["-v", "-arch", "x64", "-ext", "WixUtilExtension" | Wxses]),
     WixObjs = filelib:wildcard("*.wixobj"),
     MsiFile = generate_msi_name(C1),
     ?I("light ~p -> ~s", [WixObjs, MsiFile]),
-    run_port(
+    erlpkg_utils:run_port(
       Light, ["-v", "-ext", "WixUtilExtension", "-ext", "WixUIExtension",
               "-out", MsiFile | WixObjs]),
     ok = file:set_cwd(CurDir),
     end_time(C1, candle_light).
 
 generate_msi_name(#{app := App, version := Version,
-                    patchCode := PatchCode} = C) ->
+                    patchCode := PatchCode}) ->
     {{Y,M,D},{H,Mn,S}} = calendar:local_time(),
     MsiDate = io_lib:format("~4..0B~2..0B~2..0B_~2..0B~2..0B~2..0B",
                             [Y,M,D,H,Mn,S]),
     lists:flatten([App,"-", Version,".", PatchCode,"_", MsiDate,".msi"]).
-
-run_port(Cmd, Args) ->
-    ?D("run_port(~p, ~p)", [Cmd, Args]),
-    log_cmd(Cmd,
-            erlang:open_port(
-              {spawn_executable,Cmd},
-              [{line, 128},{args, Args}, exit_status,
-               stderr_to_stdout, {parallelism, true}])).
-run_port(Cmd, Args, Cwd) ->
-    ?D("run_port(~p, ~p, ~p)", [Cmd, Args, Cwd]),
-    log_cmd(Cmd,
-            erlang:open_port(
-              {spawn_executable,Cmd},
-              [{cd,Cwd},{line,128},{args,Args},exit_status,stderr_to_stdout,
-               {parallelism,true}])).
-
-log_cmd(Cmd, Port) -> log_cmd(Cmd, Port, []).
-log_cmd(Cmd, Port, Buf) when is_port(Port) ->
-    receive
-        {'EXIT',Port,Reason} -> ?E("~s terminated for ~p", [Cmd, Reason]);
-        {Port,closed} -> ?E("~s terminated", [Cmd]);
-        {Port,{exit_status,Status}} ->
-            if Status == 0 ->
-                ?I("~s finished successfully", [Cmd]);
-               true ->
-                   ?E("~s exit with status ~p", [Cmd, Status])
-            end,
-            catch erlang:port_close(Port);
-        {Port,{data,{F,Line}}} ->
-            log_cmd(
-              Cmd, Port,
-              if F =:= eol ->
-                     ?D("~s", [lists:reverse([Line|Buf])]),
-                     [];
-                 true -> [Line|Buf]
-              end);
-        {Port,{data,Data}} ->
-            ?D("~p", [Data]),
-            log_cmd(Cmd, Port)
-    end.
 
 -ifdef(FINISHED).
 

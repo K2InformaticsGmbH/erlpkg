@@ -23,4 +23,13 @@
 
 -define(H(__F), integer_to_list(erlang:phash2(__F,16#100000000),32)).
 
+-define(OSCMD(__Cmd),
+    (fun() ->
+        CR = os:cmd(__Cmd),
+        CmdResp = re:replace(CR, "[\r\n ]*$", "", [{return, list}]),
+        ?D(__Cmd++": ~s", [CmdResp]),
+        CmdResp
+    end)()
+).
+
 -endif. % ERLPKG_HRL

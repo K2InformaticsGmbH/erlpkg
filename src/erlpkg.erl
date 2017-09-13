@@ -84,6 +84,9 @@ do(State) ->
             %?I("rebar_api:info()", []),
             %?W("rebar_api:warn()", []),
             %?E("rebar_api:error()", []);
+        "x86_64-unknown-linux-gnu" ->
+            C2 = linux:build(C1),
+            ok;
         SYSTEM_ARCH -> ?ABORT("not supported ~s", [SYSTEM_ARCH])
     end,
     {ok, State}.
