@@ -2,158 +2,128 @@
 
 -include("common.hrl").
 
--export([main/1,copy_first_time/1,run_port/2,run_port/3,patch_code_gen/0,timestamp/0,print_stats/0]).
+-export([main/1,copy_first_time/1,run_port/2,run_port/3,gen_patch_ts/0,
+         timestamp/0,print_stats/0]).
 
--define(Lg(__Fmt,__Args), ?L("~p : "++__Fmt, [?MODULE|__Args])).
--define(Lg(__Fmt), ?Lg(__Fmt,[])).
+-define(Lg(__Fmt, __Args), ?L("~p : "++__Fmt, [?MODULE | __Args])).
+-define(Lg(__Str), ?Lg(__Str, [])).
 
 main(ScriptPath) when is_list(ScriptPath) ->
-    io:format(user, "[~p] ~p : executing ~s with verbose ~p~n",
-              [?LINE, ?MODULE, escript:script_name(), get(verbose)]),
+    ?Li("~p : executing ~s with verbose ~p",
+        [?MODULE, escript:script_name(), get(verbose)]),
     try
         C0 = get(config),
         Platform = C0#config.platform,
 
-        RootPath = case lists:reverse(filename:split(filename:absname(ScriptPath))) of
-                       [Platform, "erlpkg", "deps"
-                        | RootPathPartsRev] ->
-                           filename:join(lists:reverse(RootPathPartsRev));
-                       _ ->
-                           exit({"owner project path not found",
-                                  ScriptPath})
-                   end,
-        Rebar = case os:find_executable("rebar") of
-            false ->
-                case os:find_executable("rebar", RootPath) of
-                    false -> exit("rebar not found");
-                    R-> R
-                end;
-            R -> R
+        {ProjectPath, RootPath} =
+        case lists:reverse(filename:split(ScriptPath)) of
+            [Platform, "erlpkg", "lib" | RootPathPartsRev] ->
+                [_, "_build" | ProjectPathPartsRev] = RootPathPartsRev,
+                {filename:join(lists:reverse(ProjectPathPartsRev)),
+                 filename:join(lists:reverse(RootPathPartsRev))};
+            _ -> exit({"owner project path not found", ScriptPath})
         end,
-        SDir = ?FNJ([RootPath, "src"]),
-        AppSrcData = case filelib:is_dir(SDir) of
-                     false -> get_app_src_from_rebar_conf(RootPath);
-                     true -> get_app_src(SDir)
-                 end,
-        {App, Desc, Version} = app_info_from_app_src(AppSrcData),
-        ReleaseTopDir = ?FNJ([RootPath, "rel", "erlpkg_release"]),
+        RelDir = ?FNJ([RootPath, "rel"]),
+        case filelib:is_dir(RelDir) of
+            false -> exit("no release found, use rebar3 release");
+            true -> ok
+        end,
+        {App, Desc, Version} = app_info(RelDir),
+        ReleaseTopDir = ?FNJ([RootPath, "erlpkg_release"]),
         case filelib:is_dir(ReleaseTopDir) of
             false ->
                 ok = file:make_dir(ReleaseTopDir),
                 ?Lg("Created ~s", [ReleaseTopDir]);
             _ -> ok
         end,
-        BuildPath = ?FNJ([ReleaseTopDir,"build"]),
-        case filelib:is_dir(BuildPath) of
-            false ->
-                ok = file:make_dir(BuildPath),
-                ?Lg("Created ~s", [BuildPath]);
+        AppStr = atom_to_list(App),
+        AppRelDir = ?FNJ([RelDir, AppStr]),
+        case filelib:is_dir(AppRelDir) of
+            false -> exit({"rel path not found", AppRelDir});
             _ -> ok
         end,
-        AppStr = atom_to_list(App),
-        Conf = C0#config{app = AppStr, desc = Desc, rebar = Rebar,
-                         topDir = RootPath, version = Version,
-                         tmpSrcDir = ?FNJ([ReleaseTopDir, AppStr++"-"++Version]),
-                         buildPath = BuildPath},
+        AppRelLibDir = ?FNJ([AppRelDir, "lib", AppStr++"-"++Version]),
+        case filelib:is_dir(AppRelLibDir) of
+            false -> exit({"app rel path not found", AppRelLibDir});
+            _ -> ok
+        end,
+        Conf = C0#config{app = AppStr, desc = Desc, version = Version,
+                         topDir = ReleaseTopDir, projDir = ProjectPath,
+                         scriptDir = ScriptPath, relDir = AppRelDir,
+                         appRelDir = AppRelLibDir},
 
         put(config, Conf),
 
         % Copying application specific files
         copy_first_time("erlpkg.conf"),
-        {ok, Config} = file:consult(?FNJ([RootPath,"rel","files","erlpkg.conf"])),
+        {ok, Config} = file:consult(?FNJ([ReleaseTopDir,"erlpkg.conf"])),
         PkgName = case proplists:get_value(name, Config, '$not_found') of
                       '$not_found' -> "Application Name";
                       PName -> PName
                   end,
         PkgCompany = case proplists:get_value(company, Config, '$not_found') of
-                      '$not_found' -> "Name of the Company";
-                      Comp -> Comp
-                  end,
+                         '$not_found' -> "Name of the Company";
+                         Comp -> Comp
+                     end,
         PkgComment = case proplists:get_value(comment, Config, '$not_found') of
-                      '$not_found' -> PkgName++" is a registered trademark of "++PkgCompany;
-                      PCmnt -> PCmnt
-                  end,
+                         '$not_found' -> PkgName++" is a registered trademark of "++PkgCompany;
+                         PCmnt -> PCmnt
+                     end,
         PrivFolders = case proplists:get_value(privfolders, Config, '$not_found') of
-                      '$not_found' -> "*";
-                      PrivDirs -> PrivDirs
-                  end,
+                          '$not_found' -> "*";
+                          PrivDirs -> PrivDirs
+                      end,
         put(config, Conf#config{pkgName = PkgName, pkgCompany = PkgCompany, stats = #{},
-                                pkgComment = PkgComment, privFolders = PrivFolders})
+                                pkgComment = PkgComment, privFolders = PrivFolders}),
+        ?Lg("main -- SUCCESS")
     catch _:Error ->
               ?Lg("ERROR ~p~n~p", [Error, erlang:get_stacktrace()])
-    end. 
+    end.
 
 copy_first_time(File) ->
     C = get(config),
-    case filelib:is_file(?FNJ([C#config.topDir,"rel","files",File])) of
+    Dst = ?FNJ([C#config.topDir,File]),
+    case filelib:is_file(Dst) of
         true ->
-            ?Lg("override for ~s found in rel/files", [File]);
+            ?Lg("override for ~s found in ~s", [File, C#config.topDir]);
         false ->
-            Src = ?FNJ([C#config.topDir,"deps","erlpkg",C#config.platform,File]),
-            Dst = ?FNJ([C#config.topDir,"rel","files",File]),
             ?Lg("checking ~s", [Dst]),
             case filelib:ensure_dir(Dst) of
                 ok -> ok;
-                {error, Error1} ->
-                    exit({"failed to create path for "++Dst, Error1})
-            end,
-            case file:copy(Src, Dst) of
                 {error, Error} ->
-                    exit({"failed to copy "++File, Error});
-                {ok, _BytesCopied} ->
-                   ?Lg("copied ~s to rel/files", [File])
-            end
-    end.
-
-get_app_src_from_rebar_conf(RootPath) ->
-    case catch file:consult(?FNJ([RootPath, "rebar.config"])) of
-        {'EXIT', Error} ->
-            exit({"rebar.config not found", Error});
-        {ok, RebarConf} ->
-            case proplists:get_value(sub_dirs, RebarConf) of
-                undefined ->
-                    exit("sub_dirs not defined in rebar.config");
-                SubDirs ->
-                    case lists:foldl(
-                           fun(Dir, undefined) ->
-                                   case catch get_app_src(
-                                                ?FNJ([RootPath,Dir,"src"])) of
-                                       {'EXIT', _} -> undefined;
-                                       AppSrc -> AppSrc
-                                   end;
-                              (_Dir, AppSrc) -> AppSrc
-                           end, undefined, SubDirs) of
-                        undefined ->
-                            exit({"src dir not found", SubDirs});
-                        AppSrcFileData -> AppSrcFileData
+                    exit({"failed to create path for "++Dst, Error})
+            end,
+            ProjSrc = ?FNJ([C#config.projDir,"config",File]),
+            case filelib:is_file(ProjSrc) of
+                true ->
+                    ?Lg("override found in ~s", [ProjSrc]),
+                    case file:copy(ProjSrc, Dst) of
+                        {error, Error1} ->
+                            exit({"failed to copy "++File, Error1});
+                        {ok, _BytesCopied} ->
+                            ?Lg("copied ~s to ~s", [ProjSrc, Dst])
+                    end;
+                false ->
+                    Src = ?FNJ([C#config.scriptDir, File]),
+                    case file:copy(Src, Dst) of
+                        {error, Error1} ->
+                            exit({"failed to copy "++File, Error1});
+                        {ok, _BytesCopied} ->
+                            ?Lg("copied ~s to ~s", [Src, Dst])
                     end
             end
     end.
 
-get_app_src(SDir) ->
-    case filelib:wildcard("*.app.src", SDir) of
-        [AppSrcFile] ->
-            case catch file:consult(?FNJ([SDir, AppSrcFile])) of
-                {'EXIT', Error} -> exit({"bad file", AppSrcFile, Error});
-                {ok, AppSrcFileData} -> AppSrcFileData
-            end;
-        Else -> exit({"unable to proceed with following app.src info", Else})
-    end.
-
-app_info_from_app_src(AppSrcData) ->
-    case lists:keyfind(application, 1, AppSrcData) of
-        false -> exit({"malformed", AppSrcData});
-        {application, AppName, AppConfig} ->
-            Desc = case proplists:get_value(description, AppConfig) of
-                       undefined -> "";
-                       D -> D
-                   end,
-            Version = case proplists:get_value(vsn, AppConfig) of
-                       undefined -> exit("version not defined");
-                       V -> V
-                   end,
-            {AppName, Desc, Version}
-    end.
+app_info(RelDir) ->
+    [AppNameStr] = filelib:wildcard("*",RelDir),
+    AppName = list_to_atom(AppNameStr),
+    RELEASES = ?FNJ([RelDir, AppNameStr, "releases", "RELEASES"]),
+    {ok, [[{release,AppNameStr,Version,_,_,_}|_]]} = file:consult(RELEASES),
+    APP = ?FNJ([RelDir, AppNameStr, "lib", AppNameStr++"-"++Version,"ebin",
+                AppNameStr++".app"]),
+    {ok, [{application,AppName,Props}]} = file:consult(APP),
+    Desc = proplists:get_value(description, Props),
+    {AppName, Desc, Version}.
 
 run_port(Cmd, Args) ->
     log_cmd(Cmd,
@@ -186,9 +156,9 @@ log_cmd(Cmd, Port) when is_port(Port) ->
             log_cmd(Cmd, Port)
     end.
 
-patch_code_gen() ->
+gen_patch_ts() ->
     C = get(config),
-    BeamPath = filename:join(C#config.tmpSrcDir, "ebin"),
+    BeamPath = filename:join(C#config.appRelDir, "ebin"),
     [{{{_,Month,Day},{Hour,_,_}},_}|_]
     = lists:reverse(
         lists:usort(

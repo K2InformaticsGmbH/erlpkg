@@ -22,14 +22,19 @@
        ).
 
 -define(E(__Fmt,__Args), io:format("~s[~3..0w] "++__Fmt++"~n",
-                                   [?TS,?LINE|__Args])).
+                                   [?TS, ?LINE | __Args])).
 -define(E(__Fmt), ?E(__Fmt,[])).
 
+
+-define(Li(__Fmt, __Args),
+        io:format(user, "~s (~3..0w) "++__Fmt++"~n",
+                  [?TS, ?LINE | __Args])).
+-define(Li(__Str), ?Lg(__Str, [])).
 -define(L(__Fmt,__Args),
         (fun() ->
                  case get(verbose) of
                      __V when __V == true; __V == undefined ->
-                         io:format("~s[~3..0w] "++__Fmt++"~n", [?TS,?LINE|__Args]),
+                         ?Li(__Fmt, __Args),
                          if __V == undefined -> put(verbose, true);
                             true -> ok end;
                      false -> ok
@@ -49,8 +54,9 @@
 -define(FNJ(__Parts), filename:join(__Parts)).
 -define(FNJ(__Part1, __Part2), filename:join(__Part1, __Part2)).
 
--record(config, {platform, app, desc, version, tmpSrcDir, topDir, rebar,
-                 buildPath, pkgName, pkgCompany, pkgComment, privFolders,
-                 candle, light, upgradeCode, patchCode, tab, stats}).
+-record(config, {platform, app, desc, version, topDir, pkgName, pkgCompany,
+                 pkgComment, privFolders, candle, light, upgradeCode,
+                 patchCode, tab, stats, scriptDir, projDir, relDir,
+                 appRelDir}).
 
 -endif.
