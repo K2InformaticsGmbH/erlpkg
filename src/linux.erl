@@ -234,7 +234,6 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
         "ln -s %{_reldir}/"++Version++"/vm.args %{_config}/vm.args\n"
         "\n"
         "# Make sure shell library file is readable\n"
-        "chmod 0755 %{_libdir}/env.sh\n"
         "chown -R "++App++":"++App++" %{_installdir}\n"
         "chown -R "++App++":"++App++" %{_localstatedir}\n"
         "chown -R "++App++":"++App++" %{_run}\n"
