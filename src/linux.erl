@@ -100,43 +100,31 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
     ErlVer = erlang:system_info(version),
     ok = file:write(FileH,
         "\n"
-        "%define _topdir "++filename:absname(PkgDir)++"\n"
+        "%define _topdir        "++filename:absname(PkgDir)++"\n"
         "%define _localstatedir /var/opt/"++App++"\n"
-        "%define _bindir /opt/"++App++"/bin\n"
-        "%define _sbindir /opt/"++App++"/bin\n"
-        "%define _sysconfdir /etc\n"
-        "%define _installdir /opt/"++App++"\n"
-        "%define _reldir /opt/"++App++"/releases\n"
-        "%define _erts /opt/"++App++"/erts-"++ErlVer++"\n"
-        "%define _libdir /opt/"++App++"/lib\n"
-        "%define _config /opt/"++App++"/config\n"
-        "%define _run /var/run/"++App++"\n"
-        "%define _pipe /tmp/opt/"++App++"\n"
+        "%define _bindir        /opt/"++App++"/bin\n"
+        "%define _sbindir       /opt/"++App++"/bin\n"
+        "%define _sysconfdir    /etc\n"
+        "%define _installdir    /opt/"++App++"\n"
+        "%define _reldir        /opt/"++App++"/releases\n"
+        "%define _erts          /opt/"++App++"/erts-"++ErlVer++"\n"
+        "%define _libdir        /opt/"++App++"/lib\n"
+        "%define _config        /opt/"++App++"/config\n"
+        "%define _run           /var/run/"++App++"\n"
+        "%define _pipe          /tmp/opt/"++App++"\n"
         "%define _smp_mflags  -j3\n"
-        "%define __arch_install_post   /usr/lib/rpm/check-rpaths   /usr/lib/rpm/check-buildroot\n"
+        "%define __arch_install_post"
+             "   /usr/lib/rpm/check-rpaths   /usr/lib/rpm/check-buildroot\n"
         "%define init_script %{_sysconfdir}/init.d/"++App++"\n"
         "%define debug_package %{nil}\n"
         "%global __prelink_undo_cmd %{nil}\n"),
-
-    % Prep
-    ok = file:write(FileH,
-        "\n"
-        "%prep\n"
-        "%setup -q -n "++App++"-"++Version++"\n"),
-
-    % Build
-    ok = file:write(FileH,
-        "\n"
-        "%build\n"),
 
     % Install
     ok = file:write(FileH,
         "\n"
         "%install\n"
         "%define relpath       %{_builddir}/"++App++"-"++Version++"\n"
-        "%define buildroot_etc %{buildroot}%{_etcdir}\n"
         "\n"
-        "mkdir -p %{buildroot_etc}\n"
         "mkdir -p %{buildroot}%{_libdir}\n"
         "mkdir -p %{buildroot}%{_reldir}\n"
         "mkdir -p %{buildroot}%{_erts}\n"
@@ -145,7 +133,9 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
         "mkdir -p %{buildroot}%{_pipe}\n"
         "mkdir -p %{buildroot}%{_localstatedir}/log/"++App++"\n"
         "\n"
-        "cp -R %{relpath}/etc       %{buildroot}%{_installdir}\n"
+        "mv %{relpath}/LICENSE      %{_builddir}\n"
+        "mv %{relpath}/README.md    %{_builddir}\n"
+        "mv %{relpath}/docs/*.md    %{_builddir}\n"
         "cp -R %{relpath}/lib       %{buildroot}%{_installdir}\n"
         "cp -R %{relpath}/erts-*    %{buildroot}%{_installdir}\n"
         "cp -R %{relpath}/releases  %{buildroot}%{_installdir}\n"
@@ -161,8 +151,8 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
         "\n"
         "mkdir -p %{buildroot}%{_localstatedir}/log/"++App++"\n"
         "mkdir -p %{buildroot}%{_sysconfdir}/init.d\n"
-        "install -m755 %{buildroot_etc}/init.script  %{buildroot}%{_sysconfdir}"
-                                                                "/init.d/"++App++"\n"
+        "install -m755 %{buildroot}%{_bindir}/service.script"
+                    "  %{buildroot}%{_sysconfdir}/init.d/"++App++"\n"
         "\n"
         "# Needed to work around check-rpaths which seems to be hardcoded into"
         " recent\n"
@@ -182,10 +172,10 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
         "%defattr(-,"++App++","++App++")\n"
         "%doc LICENSE\n"
         "%doc README.md\n"
-        "%doc RELEASE-"++string:to_upper(App)++".md\n"
+        "%doc "++string:to_upper(App)++"-CHANGELOG.md\n"
+        "%doc ReleaseDocumentation.md\n"
         "%{_bindir}\n"
         "%{_erts}/*\n"
-        "%{_etcdir}/*\n"
         "%{_libdir}/*\n"
         "%{_reldir}/*\n"
         "%config(noreplace) %{_reldir}/"++Version++"/sys.config\n"
@@ -195,7 +185,6 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
         "%{_pipe}\n"
         "%{_localstatedir}/log/"++App++"\n"
         "%{_sysconfdir}/init.d/"++App++"\n"
-        %"%{_mandir}/man1\n"
         "\n"),
 
     % Change Log

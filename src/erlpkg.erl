@@ -64,28 +64,24 @@ do(State) ->
     Description = proplists:get_value(
                     description, rebar_app_info:app_details(AppInfo), ""),
     ReleaseAppDir = ?FNJ(ReleaseDir, AppName),
-    VmArgs = conf_file:parse_vmargs(
-               ?FNJ([ReleaseAppDir,"releases",Version,"vm.args"])),
-    SysConfig = conf_file:parse_config(
-                  ?FNJ([ReleaseAppDir,"releases",Version,"sys.config"])),
     C0 = Opts#{app => AppName, version => Version, desc => Description,
                pkgDir => PkgDir, rootDir => RootDir, otp => OTP_VSN,
                arch => SYSTEM_ARCH, word => WORDSIZE, profile => Profile,
-               configDir => ConfDir, relAppDir => ReleaseAppDir,
-               vmargs => VmArgs, sysconfig => SysConfig},
-    C1 = patch_timestamp(C0),
-    ?D("CONFIG:~n~p", [C1]),
+               configDir => ConfDir, relAppDir => ReleaseAppDir},
+    ?D("CONFIG:~n~p", [C0]),
     case SYSTEM_ARCH of
         "win32" ->
-            C2 = windows:build(C1),
-            ?I("STATS:~n~p", [maps:get(stats, C2)]),
+            VmArgs = conf_file:parse_vmargs(
+                       ?FNJ([ReleaseAppDir,"releases",Version,"vm.args"])),
+            SysConfig = conf_file:parse_config(
+                          ?FNJ([ReleaseAppDir,"releases",Version,"sys.config"])),
+            C1 = patch_timestamp(C0),
+            C2 = windows:build(C1#{vmargs => VmArgs, sysconfig => SysConfig}),
+            ?I("STATS:~n~p", [maps:get(stats, C2, "no stats")]),
             ok;
-            %?C("rebar_api:console()", []),
-            %?I("rebar_api:info()", []),
-            %?W("rebar_api:warn()", []),
-            %?E("rebar_api:error()", []);
         "x86_64-unknown-linux-gnu" ->
-            C2 = linux:build(C1),
+            C1 = linux:build(C0),
+            ?I("STATS:~n~p", [maps:get(stats, C1, "no stats")]),
             ok;
         SYSTEM_ARCH -> ?ABORT("not supported ~s", [SYSTEM_ARCH])
     end,
