@@ -74,11 +74,18 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
     SpecFile = ?FNJ([PkgDir, "SPECS", App++".spec"]),
     ?I("Writing Specs to ~s", [SpecFile]),
 
+    Release =
+    case re:run(os:cmd("git describe --abbrev=0 --tags"),
+                ".*\-([0-9]).*", [{capture, [1], list}]) of
+        {match, [R]} -> R;
+        _ -> "1"
+    end,
+
     {ok, FileH} = file:open(SpecFile, [write, raw]),
     ok = file:write(FileH,
         "Name:           "++App++"\n"
         "Version:        "++Version++"\n"
-        "Release:        1%{?dist}\n"
+        "Release:        "++Release++"%{?dist}\n"
         "Summary:        "++Description++"\n"
         "\n"
         "Group:          Applications/Communications\n"
