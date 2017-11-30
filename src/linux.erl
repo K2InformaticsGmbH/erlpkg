@@ -69,7 +69,7 @@ build_dir_trees(#{app := Proj, rsync := Rsync, relAppDir := Source,
     end_time(C1, build_dir_trees).
 
 make_spec(#{app := App, pkgDir := PkgDir, version := Version,
-            desc := Description} = C0) ->
+            relAppDir := RelAppDir, desc := Description} = C0) ->
     C1 = start_time(C0, make_spec),
     SpecFile = ?FNJ([PkgDir, "SPECS", App++".spec"]),
     ?I("Writing Specs to ~s", [SpecFile]),
@@ -172,6 +172,7 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
         "%clean\n"
         "rm -rf %{buildroot}\n"),
 
+    ReleaseDir = conf_file:parse_release(RelAppDir),
     % Files
     ok = file:write(FileH,
         "\n"
@@ -185,8 +186,8 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
         "%{_erts}/*\n"
         "%{_libdir}/*\n"
         "%{_reldir}/*\n"
-        "%config(noreplace) %{_reldir}/"++Version++"/sys.config\n"
-        "%config(noreplace) %{_reldir}/"++Version++"/vm.args\n"
+        "%config(noreplace) %{_reldir}/"++ReleaseDir++"/sys.config\n"
+        "%config(noreplace) %{_reldir}/"++ReleaseDir++"/vm.args\n"
         "%{_config}\n"
         "%{_run}\n"
         "%{_pipe}\n"

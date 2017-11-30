@@ -1,6 +1,6 @@
 -module(conf_file).
 
--export([parse_vmargs/1, parse_config/1, map/2]).
+-export([parse_vmargs/1, parse_config/1, map/2, parse_release/1]).
 
 parse_vmargs(CmdArgsFile) ->
     {ok, Bin} = file:read_file(CmdArgsFile),
@@ -22,9 +22,14 @@ parse_config(ErlConfFile) ->
     {ok, ConfTerm} = file:consult(ErlConfFile),
     lists:flatten(ConfTerm).
 
+parse_release(RelAppDir) ->
+    {ok,[[{release,_,Release,_,_,permanent}]]}
+    = file:consult(filename:join(RelAppDir, "releases/RELEASES")),
+    Release.
+
 map(ConfigMap, CtxMap) ->
     maps:map(
-      fun(K, {Cnf,Path}) ->
+      fun(_K, {Cnf,Path}) ->
               Conf = maps:get(Cnf, CtxMap),
               lists:foldl(
                 fun({DepApp, Var}, V) ->
