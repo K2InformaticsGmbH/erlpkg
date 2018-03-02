@@ -245,7 +245,7 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
         "chown -R "++App++":"++App++" %{_installdir}\n"
         "chown -R "++App++":"++App++" %{_localstatedir}\n"
         "chown -R "++App++":"++App++" %{_run}\n"
-        "chown -R mpro:mpro %{_pipe}\n"
+        "chown -R "++App++":"++App++" %{_pipe}\n"
         "chkconfig --add "++App++"\n"),
 
     ok = file:close(FileH),
