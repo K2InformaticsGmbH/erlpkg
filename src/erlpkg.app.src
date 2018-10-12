@@ -1,6 +1,6 @@
 {application, erlpkg,
  [{description, "Windows MSI and Linux RPM installer packager for erlang"},
-  {vsn, "1.0.0"},
+  {vsn, "1.0.1"},
   {registered, []},
   {applications,
    [kernel,
