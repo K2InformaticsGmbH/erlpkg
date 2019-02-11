@@ -1,7 +1,7 @@
 erlpkg
 =====
 
-Windows MSI and Linux RPM installer packager for erlang
+A `rebar3` plugin for Windows MSI and Linux RPM builder for erlang applications
 
 Build
 -----
