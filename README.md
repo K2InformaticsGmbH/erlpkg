@@ -14,7 +14,7 @@ Use
 Add the plugin to your rebar config:
 
     {plugins, [
-        { erlpkg, ".*", {git, "git@host:user/erlpkg.git", {tag, "0.1.0"}}}
+        { erlpkg, ".*", {git, "git@host:user/erlpkg.git", {tag, "1.0.1"}}}
     ]}.
 
 Then just call your plugin directly in an existing application:
