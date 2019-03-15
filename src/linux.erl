@@ -69,7 +69,8 @@ build_dir_trees(#{app := Proj, rsync := Rsync, relAppDir := Source,
     end_time(C1, build_dir_trees).
 
 make_spec(#{app := App, pkgDir := PkgDir, version := Version,
-            relAppDir := RelAppDir, desc := Description} = C0) ->
+            relAppDir := RelAppDir, relDir := RelDir,
+            desc := Description} = C0) ->
     C1 = start_time(C0, make_spec),
     SpecFile = ?FNJ([PkgDir, "SPECS", App++".spec"]),
     ?I("Writing Specs to ~s", [SpecFile]),
@@ -235,11 +236,11 @@ make_spec(#{app := App, pkgDir := PkgDir, version := Version,
         "if [ -L '%{_config}/sys.config' ]; then\n"
         "   rm '%{_config}/sys.config'\n"
         "fi\n"
-        "ln -s %{_reldir}/"++Version++"/sys.config %{_config}/sys.config\n"
+        "ln -s %{_reldir}/"++RelDir++"/sys.config %{_config}/sys.config\n"
         "if [ -L '%{_config}/vm.args' ]; then\n"
         "   rm '%{_config}/vm.args'\n"
         "fi\n"
-        "ln -s %{_reldir}/"++Version++"/vm.args %{_config}/vm.args\n"
+        "ln -s %{_reldir}/"++RelDir++"/vm.args %{_config}/vm.args\n"
         "\n"
         "# Make sure shell library file is readable\n"
         "chown -R "++App++":"++App++" %{_installdir}\n"

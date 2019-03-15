@@ -64,10 +64,13 @@ do(State) ->
     Description = proplists:get_value(
                     description, rebar_app_info:app_details(AppInfo), ""),
     ReleaseAppDir = ?FNJ(ReleaseDir, AppName),
+    {ok, [[{release, AppName, ReleaseVsnDir, _, _, _}]]} =
+        file:consult(?FNJ([ReleaseAppDir, "releases", "RELEASES"])),
     C0 = Opts#{app => AppName, version => Version, desc => Description,
                pkgDir => PkgDir, rootDir => RootDir, otp => OTP_VSN,
                arch => SYSTEM_ARCH, word => WORDSIZE, profile => Profile,
-               configDir => ConfDir, relAppDir => ReleaseAppDir},
+               configDir => ConfDir, relAppDir => ReleaseAppDir,
+               relDir => ReleaseVsnDir},
     ?D("CONFIG:~n~p", [C0]),
     case SYSTEM_ARCH of
         "win32" ->
