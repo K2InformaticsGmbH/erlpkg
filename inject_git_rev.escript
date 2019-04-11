@@ -94,7 +94,7 @@ git_file(RawUrlPrefix, BeamFile, SrcFilePath) ->
         list_to_binary(os:cmd("git ls-files --error-unmatch " ++ SrcFilePath)),
         filename:extension(SrcFilePath)
     } of
-        {<<"src/", _/binary>>, _} -> filename:join(RawUrlPrefix, SrcFilePath);
+        {<<"src/", _/binary>>, _} -> uri_join(RawUrlPrefix, SrcFilePath);
         {<<"error: pathspec", _/binary>>, ".erl"} ->
             git_file(
                 RawUrlPrefix, BeamFile,
@@ -113,23 +113,43 @@ git_file(RawUrlPrefix, BeamFile, SrcFilePath) ->
             );
         {<<"error: pathspec", _/binary>>, ".xrl"} ->
             {ok, Cwd} = file:get_cwd(),
-            [Repo, _, _, _, _ | Root] = lists:reverse(filename:split(Cwd)),
-            Alternate = filename:join(lists:reverse([Repo | Root])),
-            case filelib:is_dir(Alternate) of
-                true ->
-                    ok = file:set_cwd(Alternate),
-                    Res = git_file(
-                        RawUrlPrefix, BeamFile,
-                        re:replace(
-                            SrcFilePath, "\\.xrl", "\\.erl",
-                            [{return, list}]
-                        )
+            case lists:reverse(filename:split(Cwd)) of
+                [Repo, _, _, _, _ | Root] ->
+                    Alternate = filename:join(lists:reverse([Repo | Root])),
+                    case filelib:is_dir(Alternate) of
+                        true ->
+                            ok = file:set_cwd(Alternate),
+                            Res = git_file(
+                                RawUrlPrefix, BeamFile,
+                                re:replace(
+                                    SrcFilePath, "\\.xrl", "\\.erl",
+                                    [{return, list}]
+                                )
+                            ),
+                            ok = file:set_cwd(Cwd),
+                            Res;
+                        _ ->
+                            ?L(
+                                "file not found ~s(~s) at ~s~n",
+                                [SrcFilePath, BeamFile, Cwd]
+                            ),
+                            <<>>
+                    end;
+                _ ->
+                    ?L(
+                        "file not found ~s(~s) at ~s~n",
+                        [SrcFilePath, BeamFile, Cwd]
                     ),
-                    ok = file:set_cwd(Cwd),
-                    ?L("Alternate: ~p BeamFile ~p Res ~p~n",
-                     [Alternate, BeamFile, Res]),
-                    Res;
-                _ -> <<>>
+                    <<>>
             end;
-        _ -> <<>>
+        Other ->
+            ?L("~s(~s) ~p~n", [SrcFilePath, BeamFile, Other]),
+            <<>>
     end.
+
+uri_join(Url, Src) ->
+    uri_join(binary:last(Url), Url, Src).
+uri_join($/, Url, [$/|Src])     -> list_to_binary([Url, Src]);
+uri_join($/, Url, Src)          -> list_to_binary([Url, Src]);
+uri_join(_, Url, [$/|_] = Src)  -> list_to_binary([Url, Src]);
+uri_join(_, Url, Src)           -> list_to_binary([Url, "/", Src]).
