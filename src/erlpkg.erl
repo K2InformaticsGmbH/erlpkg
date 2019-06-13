@@ -48,11 +48,10 @@ do(State) ->
                         [?MODULE, ?LINE, Other])
     end,
     {ok, RootDir} = file:get_cwd(),
-    Profile =
-    case rebar_state:current_profiles(State) of
-        [default, P] -> P;
-        Other1 -> ?ABORT("{~p,~p} bad profiles : ~p",
-                         [?MODULE, ?LINE, Other1])
+    Profile = case rebar_state:current_profiles(State) of
+        [default | Profiles] ->
+            string:join([atom_to_list(P) || P <- Profiles], "+");
+        Other1 -> ?ABORT("{~p,~p} bad profiles : ~p", [?MODULE, ?LINE, Other1])
     end,
     ReleaseDir = ?FNJ([RootDir, "_build", Profile, "rel"]),
     PkgDir = ?FNJ(ReleaseDir, "erlpkg"),
