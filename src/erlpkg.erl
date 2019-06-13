@@ -48,7 +48,10 @@ do(State) ->
                         [?MODULE, ?LINE, Other])
     end,
     {ok, RootDir} = file:get_cwd(),
+    [AppInfo] = rebar_state:project_apps(State),
+    AppName = binary_to_list(rebar_app_info:name(AppInfo)),
     {Profile, Release} = case rebar_state:current_profiles(State) of
+        [default, prod] -> {"prod", AppName};
         [default | Profiles] ->
             {string:join([atom_to_list(P) || P <- Profiles], "+"),
              atom_to_list(lists:last(Profiles))};
@@ -58,8 +61,6 @@ do(State) ->
     PkgDir = ?FNJ(ReleaseDir, "erlpkg"),
     ConfDir = ?FNJ(RootDir, "config"),
     Opts = get_opts(ConfDir, State),
-    [AppInfo] = rebar_state:project_apps(State),
-    AppName = binary_to_list(rebar_app_info:name(AppInfo)),
     Version = rebar_app_info:original_vsn(AppInfo),
     Description = proplists:get_value(
                     description, rebar_app_info:app_details(AppInfo), ""),
