@@ -14,7 +14,7 @@ build(#{} = C0) ->
               [?MODULE, ?LINE]);
         _ -> ok
     end,
-    C2 = C1#{tab => list_to_atom(maps:get(app, C1))},
+    C2 = C1#{tab => list_to_atom(maps:get(rel, C1))},
     ets:new(maps:get(tab, C2), [public, named_table, {keypos, 2}]),
     C3 = case C2 of
              #{msi := MsiConfPath, configDir := ConfDir}
@@ -58,13 +58,13 @@ copy_assets(#{pkgDir := PkgDir} = C) ->
         (K, V, M) -> M#{K => V}
      end, #{}, C).
 
-create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
+create_wxs(#{rel := Rel, version := Version, pkgDir := PkgDir,
              company := Company, upgradecode := UpgradeCode,
              desc := Comment} = C0) ->
     C1 = start_time(C0, create_wxs),
     ensure_path(PkgDir),
     C2 = copy_assets(C1),
-    WxsFile = ?FNJ([PkgDir, lists:flatten([Proj,"-",Version,".wxs"])]),
+    WxsFile = ?FNJ([PkgDir, lists:flatten([Rel,"-",Version,".wxs"])]),
     ?I("Create ~s", [WxsFile]),
     ?I("---------------------------------------------------------------------"),
     {ok, FileH} = file:open(WxsFile, [write]),
@@ -84,7 +84,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'\n"
         "     xmlns:util='http://schemas.microsoft.com/wix/UtilExtension'>\n\n"
 
-        "<Product Name='"++Proj++"'\n"
+        "<Product Name='"++Rel++"'\n"
         "         Id='"++PRODUCT_GUID++"'\n"
         "         UpgradeCode='"++UPGRADE_GUID++"'\n"
         "         Language='1033' Codepage='1252' Version='"++Version++"'\n"
@@ -105,10 +105,10 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
                 " DowngradeErrorMessage='A later version of [ProductName]"
                     " is already installed. Setup will now exit.' />\n\n"
 
-        "   <Media Id='1' Cabinet='"++Proj++".cab' EmbedCab='yes'\n"
+        "   <Media Id='1' Cabinet='"++Rel++".cab' EmbedCab='yes'\n"
         "          DiskPrompt='CD-ROM #1'/>\n"
         "   <Property Id='DiskPrompt'\n"
-        "             Value=\""++Company++" "++Proj
+        "             Value=\""++Company++" "++Rel
                                              ++" Installation [1]\"/>\n\n"),
 
     ?I("wxs header sections created"),
@@ -127,7 +127,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "             <Permission User='Everyone' GenericAll='yes' />\n"
         "           </CreateFolder>\n"
         "         </Component>\n"
-        "         <Directory Id='PRODUCTDAT' Name='"++Proj++"'>\n"
+        "         <Directory Id='PRODUCTDAT' Name='"++Rel++"'>\n"
         "           <Component Id='"++AppDatId++"' Guid='"++AppDatGuId++"'>\n"
         "             <CreateFolder Directory='PRODUCTDAT'>\n"
         "               <Permission User='Everyone' GenericAll='yes' />\n"
@@ -141,7 +141,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     ok = file:write(FileH,
         "     <Directory Id='ProgramFiles64Folder' Name='PFiles'>\n"
         "       <Directory Id='"++ID++"' Name='"++Company++"'>\n"
-        "         <Directory Id='INSTALLDIR' Name='"++Proj++"'>\n"),
+        "         <Directory Id='INSTALLDIR' Name='"++Rel++"'>\n"),
 
     walk_release(C3),
     ?I("finished walking OTP release"),
@@ -159,9 +159,9 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
                             [], ['$_']}]),
     [EditConfEs] = select(C3, [{#item{type=component, name="editconfs.escript",
                                   _='_'}, [], ['$_']}]),
-    [SrvcCtrlEs] = select(C3, [{#item{type=component, name=Proj++".cmd",
+    [SrvcCtrlEs] = select(C3, [{#item{type=component, name=Rel++".cmd",
                                   _='_'}, [], ['$_']}]),
-    [SrvcCtrlEsFile] = select(C3, [{#item{type=file, name=Proj++".cmd",
+    [SrvcCtrlEsFile] = select(C3, [{#item{type=file, name=Rel++".cmd",
                                       guid=undefined, _='_'}, [], ['$_']}]),
 
     {ProgFolderId, ProgFolderGuId} =
@@ -172,14 +172,14 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     ok = file:write(FileH,
         "     <Directory Id='ProgramMenuFolder' Name='Programs'>\n"
         "        <Directory Id='ApplicationProgramMenuFolder'\n"
-        "                   Name='"++Proj++"' />\n"
+        "                   Name='"++Rel++"' />\n"
         "     </Directory> <!-- ProgramMenuFolder -->\n\n"),
 
     ?I("finished ProgramMenuFolder section"),
 
     ok = file:write(FileH,
         "     <Directory Id='DesktopFolder' Name='Desktop'>\n"
-        "       <Directory Id='ApplicationDesktopFolder' Name='"++Proj++"'/>\n"
+        "       <Directory Id='ApplicationDesktopFolder' Name='"++Rel++"'/>\n"
         "     </Directory> <!-- DesktopFolder -->\n\n"),
 
     ?I("finished DesktopFolder section"),
@@ -268,7 +268,7 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
     SrvcCommand = "\"[INSTALLDIR]"
                   ++ string:join(
                        lists:sublist(SrvcCtrlEsPath, length(SrvcCtrlEsPath), 1)
-                       ++ [Proj++".cmd"]
+                       ++ [Rel++".cmd"]
                        , "\\")
                   ++ "\"",
 
@@ -345,13 +345,13 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "   <DirectoryRef Id='ApplicationProgramMenuFolder'>\n"
         "       <Component Id='"++ProgFolderId++"' Guid='"++ProgFolderGuId++"'>\n"
         "           <Shortcut Id='programattach'\n"
-        "                     Name='"++Proj++" Attach'\n"
+        "                     Name='"++Rel++" Attach'\n"
         "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
         "                     Arguments='attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='APPICON' IconIndex='0' />\n"
         "           <Shortcut Id='programgui'\n"
-        "                     Name='"++Proj++" GUI'\n"
+        "                     Name='"++Rel++" GUI'\n"
         "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
         "                     Arguments='console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
@@ -390,13 +390,13 @@ create_wxs(#{app := Proj, version := Version, pkgDir := PkgDir,
         "   <DirectoryRef Id='ApplicationDesktopFolder'>\n"
         "       <Component Id='"++DsktpShortId++"' Guid='"++DsktpShortGuId++"'>\n"
         "           <Shortcut Id='desktopattach'\n"
-        "                     Name='"++Proj++" Attach'\n"
+        "                     Name='"++Rel++" Attach'\n"
         "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
         "                     Arguments='attach'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
         "                     Icon='APPICON' IconIndex='0' />\n"
         "           <Shortcut Id='desktopgui'\n"
-        "                     Name='"++Proj++" GUI'\n"
+        "                     Name='"++Rel++" GUI'\n"
         "                     Target='[#"++SrvcCtrlEsFile#item.id++"]'\n"
         "                     Arguments='console'\n"
         "                     WorkingDirectory='"++BootDir#item.id++"'\n"
@@ -594,13 +594,13 @@ get_filepath(Dir, F) ->
           [], filename:split(Dir)),
     ?FNJ([".." | FilePathNoRel]++[F]).
 
-build_features(#{wxsFileH := FileH, app := Proj, version := Version} = C) ->
+build_features(#{wxsFileH := FileH, rel := Rel, version := Version} = C) ->
     ok = file:write(FileH,
-        "   <Feature Id='Complete' Title='"++Proj++"-"++Version++"'"
+        "   <Feature Id='Complete' Title='"++Rel++"-"++Version++"'"
                     " Description='The complete package.'"
                     " Level='1' ConfigurableDirectory='INSTALLDIR'>\n"),
     ok = file:write(FileH,
-        "      <Feature Id='MainProgram' Title='"++Proj++"-"++Version
+        "      <Feature Id='MainProgram' Title='"++Rel++"-"++Version
                                                         ++" service'"
                     " Description='The service.' Level='1'>\n"),
     foreach(
@@ -628,12 +628,12 @@ candle_light(#{candle := Candle, light := Light, pkgDir := PkgDir} = C) ->
     ok = file:set_cwd(CurDir),
     end_time(C1, candle_light).
 
-generate_msi_name(#{app := App, version := Version,
+generate_msi_name(#{rel := Rel, version := Version,
                     patchCode := PatchCode}) ->
     {{Y,M,D},{H,Mn,S}} = calendar:local_time(),
     MsiDate = io_lib:format("~4..0B~2..0B~2..0B_~2..0B~2..0B~2..0B",
                             [Y,M,D,H,Mn,S]),
-    lists:flatten([App,"-", Version,".", PatchCode,"_", MsiDate,".msi"]).
+    lists:flatten([Rel,"-", Version,".", PatchCode,"_", MsiDate,".msi"]).
 
 -ifdef(FINISHED).
 

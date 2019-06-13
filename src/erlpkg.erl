@@ -48,29 +48,33 @@ do(State) ->
                         [?MODULE, ?LINE, Other])
     end,
     {ok, RootDir} = file:get_cwd(),
-    Profile =
-    case rebar_state:current_profiles(State) of
-        [default, P] -> P;
-        Other1 -> ?ABORT("{~p,~p} bad profiles : ~p",
-                         [?MODULE, ?LINE, Other1])
+    [AppInfo] = rebar_state:project_apps(State),
+    AppName = binary_to_list(rebar_app_info:name(AppInfo)),
+    {Profile, Release} = case rebar_state:current_profiles(State) of
+        [default, prod] -> {"prod", AppName};
+        [default | Profiles] ->
+            {string:join([atom_to_list(P) || P <- Profiles], "+"),
+             atom_to_list(lists:last(Profiles))};
+        Other1 -> ?ABORT("{~p,~p} bad profiles : ~p", [?MODULE, ?LINE, Other1])
     end,
     ReleaseDir = ?FNJ([RootDir, "_build", Profile, "rel"]),
     PkgDir = ?FNJ(ReleaseDir, "erlpkg"),
     ConfDir = ?FNJ(RootDir, "config"),
     Opts = get_opts(ConfDir, State),
-    [AppInfo] = rebar_state:project_apps(State),
-    AppName = binary_to_list(rebar_app_info:name(AppInfo)),
     Version = rebar_app_info:original_vsn(AppInfo),
     Description = proplists:get_value(
                     description, rebar_app_info:app_details(AppInfo), ""),
-    ReleaseAppDir = ?FNJ(ReleaseDir, AppName),
-    {ok, [[{release, AppName, ReleaseVsnDir, _, _, _}]]} =
+    ReleaseAppDir = ?FNJ(ReleaseDir, Release),
+    ?D("ReleaseAppDir ~p", [ReleaseAppDir]),
+    {ok, [[{release, Release, ReleaseVsnDir, _, _, _}]]} =
         file:consult(?FNJ([ReleaseAppDir, "releases", "RELEASES"])),
-    C0 = Opts#{app => AppName, version => Version, desc => Description,
-               pkgDir => PkgDir, rootDir => RootDir, otp => OTP_VSN,
-               arch => SYSTEM_ARCH, word => WORDSIZE, profile => Profile,
-               configDir => ConfDir, relAppDir => ReleaseAppDir,
-               relDir => ReleaseVsnDir},
+    C0 = Opts#{
+        rel => Release, app => AppName, version => Version, desc => Description,
+        pkgDir => PkgDir, rootDir => RootDir, otp => OTP_VSN,
+        arch => SYSTEM_ARCH, word => WORDSIZE, profile => Profile,
+        configDir => ConfDir, relAppDir => ReleaseAppDir,
+        relDir => ReleaseVsnDir
+    },
     ?D("CONFIG:~n~p", [C0]),
     case SYSTEM_ARCH of
         "win32" ->

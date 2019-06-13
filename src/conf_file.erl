@@ -1,8 +1,10 @@
 -module(conf_file).
+-include("erlpkg.hrl").
 
 -export([parse_vmargs/1, parse_config/1, map/2, parse_release/1]).
 
 parse_vmargs(CmdArgsFile) ->
+    ?D("CmdArgsFile ~p", [CmdArgsFile]),
     {ok, Bin} = file:read_file(CmdArgsFile),
     maps:from_list(lists:filtermap(      
       fun(<<>>) -> false;
